@@ -1,6 +1,8 @@
-<article class="post-card">
-  <div class="post-meta"><span class="status-dot" aria-hidden="true"></span> {{ include.post.date | date: '%d.%m.%Y' }} <span class="meta-separator">/</span> {% if include.post.categories.size > 0 %}{{ include.post.categories.first | escape }}{% else %}Notas{% endif %}</div>
+<!-- Card reutilizado na capa e no arquivo. Altere uma vez para mudar ambos. -->
+<article class="post-card"
+  data-tags="|{{ include.post.tags | join: '|' | downcase | escape }}|">
+  <div class="post-meta"><span class="status-dot" aria-hidden="true"></span>{{ include.post.date | date: '%d.%m.%Y' }}<span class="meta-separator">/</span>{{ include.post.categories.first | default: 'Notas' | escape }}</div>
   <h3><a href="{{ include.post.url | relative_url }}">{{ include.post.title | escape }} <span aria-hidden="true">↗</span></a></h3>
-  <p>{{ include.post.description | default: include.post.excerpt | strip_html | normalize_whitespace | truncate: 170 | escape }}</p>
-  <div class="tag-list">{% for tag in include.post.tags limit: 3 %}<span class="tag">#{{ tag | escape }}</span>{% endfor %}</div>
+  <p>{{ include.post.description | default: include.post.excerpt | strip_html | normalize_whitespace | truncate: 160 | escape }}</p>
+  <div class="tag-list">{% for tag in include.post.tags limit: 4 %}<span class="tag">#{{ tag | escape }}</span>{% endfor %}</div>
 </article>
