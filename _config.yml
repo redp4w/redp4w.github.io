@@ -1,14 +1,15 @@
-title: "Security Research & Writeups"
-description: "Cybersecurity, SOC, Pentesting and TryHackMe Labs"
-
-theme: hacker
-
-url: "https://redp4w.github.io"
-baseurl: ""
-
+title: 'redp4w // security notes'
+description: 'Writeups, walkthroughs e estudos em segurança ofensiva e defensiva por Jezer Ferreira.'
+url: 'https://redp4w.github.io'
+baseurl: ''
 lang: pt-BR
-
+timezone: America/Sao_Paulo
+markdown: kramdown
+highlighter: rouge
+permalink: /notes/:title/
+theme: jekyll-theme-hacker
 show_excerpts: true
-
-header_pages:
-  - about.md
+exclude:
+  - README.md
+  - Gemfile
+  - Gemfile.lock
