@@ -4,7 +4,7 @@ layout: default
 <section class="archive-intro">
   <div class="eyebrow">INDEX / SINGLE ARCHIVE</div>
   <h1>{{ page.title | escape }}<span class="cursor glow">_</span></h1>
-  <p>{{ page.description | escape }} Os artigos ficam todos em <code>_posts/</code>; o conteúdo aparece automaticamente aqui.</p>
+  <p>{{ page.description | escape }}</p>
 </section>
 <!-- Filtros progressivos: sem JavaScript, a listagem completa continua acessível. -->
 <section class="archive-tools" aria-label="Busca e filtros">
@@ -24,7 +24,7 @@ layout: default
     {% for post in site.posts %}
       {% include post-card.html post=post %}
     {% else %}
-      <p class="empty-state">Nenhum artigo publicado. Adicione arquivos Markdown em <code>_posts/</code>.</p>
+      <p class="empty-state">Ainda não há publicações por aqui.</p>
     {% endfor %}
   </div>
   <p class="empty-state" id="no-results" hidden>Nenhum registro corresponde ao filtro ou à busca.</p>

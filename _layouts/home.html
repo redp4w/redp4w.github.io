@@ -3,6 +3,8 @@ layout: default
 ---
 <!-- A página inicial usa os artigos de _posts/; não é preciso editá-la ao publicar. -->
 <section class="hero">
+  <!-- Avatar público do perfil GitHub; efeito suave definido em assets/css/style.css. -->
+  <div class="hero-avatar" aria-hidden="true"><img src="https://avatars.githubusercontent.com/u/168608062?v=4" width="320" height="320" alt=""></div>
   <div class="eyebrow"><span class="status-dot" aria-hidden="true"></span> REDP4W / SECURITY FIELD NOTES <span class="hero-index">[ PUBLIC LOG ]</span></div>
   <h1>Curiosidade em execução.<br><span class="glow">Conhecimento em registro<span class="cursor">_</span></span></h1>
   <p class="hero-lead">Segurança ofensiva e defensiva, investigações práticas e aprendizado contínuo. Cada publicação busca explicar não só o que funciona, mas como, por que e como detectar ou mitigar.</p>
@@ -18,7 +20,7 @@ layout: default
     {% for post in site.posts limit: 4 %}
       {% include post-card.html post=post %}
     {% else %}
-      <p class="empty-state">Ainda não há artigos em <code>_posts/</code>.</p>
+      <p class="empty-state">Novas publicações em breve.</p>
     {% endfor %}
   </div>
 </section>

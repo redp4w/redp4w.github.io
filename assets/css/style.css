@@ -15,6 +15,7 @@
   --text: #e1eee8;
   --muted: #9bb2ae;
   --green: #b0ff69;
+  --red: #ff5b6e; /* Reservado à assinatura p4w: o glow geral permanece verde. */
   --cyan: #70e0d7;
   --mono: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
   --sans: system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
@@ -46,6 +47,7 @@ button { cursor: pointer; }
 .topbar-inner { min-height: 76px; display: flex; justify-content: space-between; align-items: center; gap: 25px; }
 .brand { font: bold 22px/1 var(--mono); letter-spacing: -1px; white-space: nowrap; }
 .brand .prompt { margin-right: 9px; }
+.brand-red { color: var(--red); text-shadow: 0 0 15px #ff5b6e40; }
 .brand-tail { color: var(--muted); font-size: 12px; letter-spacing: normal; }
 .nav { display: flex; align-items: center; gap: 28px; }
 .nav a { font: 12px/1.5 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
@@ -55,6 +57,10 @@ button { cursor: pointer; }
 
 /* 03 / Capa ------------------------------------------------------- */
 .hero { overflow: hidden; position: relative; border: 1px solid var(--stroke); background: linear-gradient(135deg, #142b2b, #0d1719 74%); padding: 53px 54px 0; box-shadow: 0 25px 80px #0005; }
+.hero-avatar { position: absolute; right: 2%; top: 4%; width: min(34%, 330px); aspect-ratio: 1; z-index: 0; pointer-events: none; opacity: .21; filter: grayscale(1) contrast(1.12); -webkit-mask-image: radial-gradient(circle, #000 35%, transparent 72%); mask-image: radial-gradient(circle, #000 35%, transparent 72%); }
+.hero-avatar img { display: block; width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
+/* Avatar decorativo: conteúdo da capa sempre acima da imagem. */
+.hero-actions, .hero-line, .eyebrow { position: relative; z-index: 1; }
 .hero::after { content: '01'; position: absolute; right: -20px; top: -42px; font: bold 240px/1 var(--mono); color: #b0ff6908; pointer-events: none; }
 .eyebrow, .section-number, .hero-index, .track-id, .post-meta, .article-meta, .breadcrumb { font: 12px/1.6 var(--mono); letter-spacing: .07em; text-transform: uppercase; color: var(--cyan); }
 .status-dot { width: 7px; height: 7px; display: inline-block; margin-right: 8px; background: var(--green); border-radius: 50%; box-shadow: 0 0 12px #b0ff6999; vertical-align: middle; }
@@ -162,6 +168,7 @@ a.tag:hover { border-color: var(--green); color: var(--green); }
   .nav { gap: 20px; flex-wrap: wrap; }
   .nav a { font-size: 11px; }
   .hero { padding: 30px 23px 0; }
+  .hero-avatar { right: -10%; top: 5%; width: 55%; opacity: .12; }
   .hero h1 { font-size: 36px; }
   .hero-lead { font-size: 15px; }
   .hero-actions .btn { width: 100%; }
