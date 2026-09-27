@@ -1,7 +1,7 @@
 title: "Security Research & Writeups"
 description: "Cybersecurity, SOC, Pentesting and TryHackMe Labs"
 
-theme: minima
+theme: hacker
 
 url: "https://redp4w.github.io"
 baseurl: ""
