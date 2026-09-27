@@ -1,19 +1,32 @@
 ---
 layout: default
 ---
-<section class="archive-intro"><div class="eyebrow">INDEX / {{ page.collection_filter | upcase | escape }}</div><h1>{{ page.title | escape }}<span class="cursor">_</span></h1><p>{{ page.description | escape }}</p><a class="text-link" href="{{ '/' | relative_url }}">← Voltar ao início</a></section>
-<section class="section"><div class="section-heading"><div><span class="section-number">/ ENTRADAS</span><h2>Biblioteca</h2></div></div><div class="post-grid">
-{% assign visible_count = 0 %}
-{% for post in site.posts %}
-  {% assign show_post = false %}
-  {% if page.collection_filter == 'all' %}{% assign show_post = true %}{% endif %}
-  {% if page.collection_filter == 'walkthroughs' %}
-    {% if post.categories contains 'TryHackMe' or post.categories contains 'HackTheBox' or post.categories contains 'Walkthroughs' %}{% assign show_post = true %}{% endif %}
-  {% endif %}
-  {% if page.collection_filter == 'studies' %}
-    {% if post.categories contains 'Estudos' or post.categories contains 'Research' or post.categories contains 'Studies' %}{% assign show_post = true %}{% endif %}
-  {% endif %}
-  {% if show_post %}{% include post-card.html post=post %}{% assign visible_count = visible_count | plus: 1 %}{% endif %}
-{% endfor %}
-{% if visible_count == 0 %}<p class="empty-state">Nenhum registro publicado nesta trilha ainda. Confira o <a href="{{ '/writeups/' | relative_url }}">arquivo completo</a>.</p>{% endif %}
-</div></section>
+<section class="archive-intro">
+  <div class="eyebrow">INDEX / SINGLE ARCHIVE</div>
+  <h1>{{ page.title | escape }}<span class="cursor glow">_</span></h1>
+  <p>{{ page.description | escape }} Os artigos ficam todos em <code>_posts/</code>; o conteúdo aparece automaticamente aqui.</p>
+</section>
+<!-- Filtros progressivos: sem JavaScript, a listagem completa continua acessível. -->
+<section class="archive-tools" aria-label="Busca e filtros">
+  <label for="post-search">Buscar nos registros</label>
+  <input id="post-search" type="search" placeholder="Ex.: Linux, SOC, CVE, TryHackMe..." autocomplete="off">
+  <div class="filter-list" role="group" aria-label="Filtrar por tag">
+    <button class="filter-chip active" type="button" data-filter="" aria-pressed="true">Todas</button>
+    {% for tag in site.tags %}
+      <button class="filter-chip" type="button" data-filter="{{ tag[0] | downcase | escape }}" aria-pressed="false">#{{ tag[0] | escape }}</button>
+    {% endfor %}
+  </div>
+  <p id="result-count" class="result-count" aria-live="polite">{{ site.posts.size }} registros disponíveis</p>
+</section>
+<section class="section archive-results" aria-labelledby="entries-title">
+  <div class="section-heading"><div><span class="section-number">/ ENTRIES</span><h2 id="entries-title">Biblioteca</h2></div></div>
+  <div class="post-grid" id="archive-grid">
+    {% for post in site.posts %}
+      {% include post-card.html post=post %}
+    {% else %}
+      <p class="empty-state">Nenhum artigo publicado. Adicione arquivos Markdown em <code>_posts/</code>.</p>
+    {% endfor %}
+  </div>
+  <p class="empty-state" id="no-results" hidden>Nenhum registro corresponde ao filtro ou à busca.</p>
+</section>
+<script defer src="{{ '/assets/js/archive.js' | relative_url }}"></script>

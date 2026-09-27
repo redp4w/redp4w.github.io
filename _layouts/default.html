@@ -1,39 +1,38 @@
 <!doctype html>
-<html lang="pt-BR">
+<html lang="{{ site.lang | default: 'pt-BR' }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#080e10">
+  <meta name="theme-color" content="#080f12">
   <meta name="description" content="{{ page.description | default: site.description | escape }}">
-  <meta property="og:type" content="website">
   <meta property="og:title" content="{{ page.title | default: site.title | escape }}">
   <meta property="og:description" content="{{ page.description | default: site.description | escape }}">
   <meta property="og:url" content="{{ page.url | absolute_url }}">
   <link rel="canonical" href="{{ page.url | absolute_url }}">
   <link rel="icon" type="image/svg+xml" href="{{ '/assets/favicon.svg' | relative_url }}">
+  <!-- Estilo local: não carregar CSS de temas externos. -->
   <link rel="stylesheet" href="{{ '/assets/css/style.css' | relative_url }}">
-  <link rel="alternate" type="application/json" title="Publicações recentes" href="{{ '/latest.json' | relative_url }}">
-  <title>{% if page.title %}{{ page.title | escape }} — {% endif %}{{ site.title | escape }}</title>
+  <link rel="alternate" type="application/json" href="{{ '/latest.json' | relative_url }}" title="Últimas publicações">
+  <title>{% if page.title and page.url != '/' %}{{ page.title | escape }} · {% endif %}{{ site.title | escape }}</title>
 </head>
 <body>
-  <a class="skip-link" href="#main">Ir para o conteúdo</a>
+  <a href="#main" class="skip-link">Ir ao conteúdo</a>
   <div class="ambient" aria-hidden="true"></div>
+  <!-- Links fixos: apenas início, arquivo único e GitHub. -->
   <header class="topbar">
     <div class="shell topbar-inner">
-      <a class="brand" href="{{ '/' | relative_url }}" aria-label="redp4w: início"><span class="brand-sign">&gt;_</span> red<span class="brand-accent">p4w</span><span class="brand-tail">/notes</span></a>
+      <a class="brand" href="{{ '/' | relative_url }}" aria-label="redp4w, início"><span class="prompt">&gt;_</span> red<span class="glow">p4w</span><span class="brand-tail"> / notes</span></a>
       <nav class="nav" aria-label="Navegação principal">
         <a href="{{ '/' | relative_url }}" {% if page.url == '/' %}aria-current="page"{% endif %}>Início</a>
-        <a href="{{ '/writeups/' | relative_url }}" {% if page.url == '/writeups/' %}aria-current="page"{% endif %}>Arquivo</a>
-        <a href="{{ '/walkthroughs/' | relative_url }}" {% if page.url == '/walkthroughs/' %}aria-current="page"{% endif %}>Walkthroughs</a>
-        <a href="{{ '/estudos/' | relative_url }}" {% if page.url == '/estudos/' %}aria-current="page"{% endif %}>Estudos</a>
+        <a href="{{ '/arquivo/' | relative_url }}" {% if page.url == '/arquivo/' %}aria-current="page"{% endif %}>Arquivo</a>
         <a href="https://github.com/redp4w" target="_blank" rel="noopener noreferrer">GitHub ↗</a>
       </nav>
     </div>
   </header>
-  <main id="main" class="shell main-content">{{ content }}</main>
-  <footer class="footer shell">
-    <span><span class="prompt">$</span> echo 'learn · document · improve'</span>
-    <span><a href="https://github.com/redp4w">Perfil</a> <span class="divider-mark">/</span> <a href="https://tryhackme.com/p/probablyacat">TryHackMe</a> <span class="divider-mark">/</span> <a href="https://www.linkedin.com/in/jezer-ferreira/">LinkedIn</a></span>
+  <main class="shell main-content" id="main">{{ content }}</main>
+  <footer class="shell footer">
+    <span><span class="prompt">$</span> learn --investigate --document --defend</span>
+    <span><a href="https://github.com/redp4w">Perfil GitHub</a> <span class="divider-mark">/</span> <a href="https://tryhackme.com/p/probablyacat">TryHackMe</a></span>
   </footer>
 </body>
 </html>

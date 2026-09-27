@@ -2,8 +2,13 @@
 layout: default
 ---
 <article class="article-page">
-  <nav class="breadcrumb" aria-label="Trilha de navegação"><a href="{{ '/' | relative_url }}">~/notes</a> <span>/</span> <a href="{{ '/writeups/' | relative_url }}">arquivo</a> <span>/</span> {{ page.slug | escape }}</nav>
-  <div class="article-meta"><span class="status-dot" aria-hidden="true"></span> {{ page.date | date: '%d.%m.%Y' }} <span class="meta-separator">//</span> {% if page.categories.size > 0 %}{{ page.categories | join: ' · ' | escape }}{% endif %} <span class="meta-separator">//</span> leitura ~{{ page.content | number_of_words | divided_by: 200 | plus: 1 }} min</div>
+  <nav class="breadcrumb" aria-label="Caminho"><a href="{{ '/' | relative_url }}">~/notes</a><span>/</span><a href="{{ '/arquivo/' | relative_url }}">arquivo</a><span>/</span>{{ page.slug | escape }}</nav>
+  <div class="article-meta"><span class="status-dot" aria-hidden="true"></span>{{ page.date | date: '%d.%m.%Y' }}{% if page.categories.size > 0 %}<span class="meta-separator">/</span>{{ page.categories | join: ' · ' | escape }}{% endif %}<span class="meta-separator">/</span>~{{ page.content | number_of_words | divided_by: 200 | plus: 1 }} min</div>
+  <!-- O título H1 fica no corpo Markdown do artigo existente; evita duplicá-lo. -->
   <div class="article-content prose">{{ content }}</div>
-  <div class="article-footer"><div class="tag-list">{% for tag in page.tags %}<span class="tag">#{{ tag | escape }}</span>{% endfor %}</div><p>Material educacional. Reproduza técnicas somente em ambientes próprios ou autorizados.</p><div class="article-actions"><a class="btn quiet" href="{{ '/writeups/' | relative_url }}">← Voltar ao arquivo</a><a class="btn quiet" href="https://github.com/redp4w/redp4w.github.io/issues/new">Sugerir uma correção ↗</a></div></div>
+  <div class="article-footer">
+    <div class="tag-list">{% for tag in page.tags %}<a class="tag" href="{{ '/arquivo/' | relative_url }}?tag={{ tag | downcase | url_encode }}">#{{ tag | escape }}</a>{% endfor %}</div>
+    <p>Material educacional. Reproduza técnicas apenas em ambientes próprios ou autorizados.</p>
+    <div class="article-actions"><a class="btn quiet" href="{{ '/arquivo/' | relative_url }}">← Voltar ao arquivo</a><a class="btn quiet" href="https://github.com/redp4w/redp4w.github.io/issues/new">Sugerir correção ↗</a></div>
+  </div>
 </article>

@@ -1,23 +1,34 @@
 ---
 layout: default
 ---
+<!-- A página inicial usa os artigos de _posts/; não é preciso editá-la ao publicar. -->
 <section class="hero">
-  <div class="eyebrow"><span class="status-dot" aria-hidden="true"></span> FIELD NOTES / CYBERSECURITY <span class="hero-index">[001]</span></div>
-  <h1>Pesquisa, laboratório<br><span class="glow">&amp; documentação<span class="cursor">_</span></span></h1>
-  <p class="hero-lead">Um registro aberto de investigações técnicas em segurança ofensiva e defensiva. Menos respostas prontas; mais contexto, comandos, evidências e mitigação.</p>
-  <div class="hero-actions"><a class="btn primary" href="{{ '/writeups/' | relative_url }}">Explorar publicações <span aria-hidden="true">↗</span></a><a class="btn quiet" href="https://github.com/redp4w">Conhecer o autor <span aria-hidden="true">↗</span></a></div>
-  <div class="hero-line" aria-hidden="true"><span>SECURITY LAB</span><span>LINUX / WINDOWS / SOC / PENTEST</span><span>{{ site.posts.size }} REGISTROS</span></div>
+  <div class="eyebrow"><span class="status-dot" aria-hidden="true"></span> REDP4W / SECURITY FIELD NOTES <span class="hero-index">[ PUBLIC LOG ]</span></div>
+  <h1>Curiosidade em execução.<br><span class="glow">Conhecimento em registro<span class="cursor">_</span></span></h1>
+  <p class="hero-lead">Segurança ofensiva e defensiva, investigações práticas e aprendizado contínuo. Cada publicação busca explicar não só o que funciona, mas como, por que e como detectar ou mitigar.</p>
+  <div class="hero-actions">
+    <a class="btn primary" href="{{ '/arquivo/' | relative_url }}">Acessar arquivo <span aria-hidden="true">↗</span></a>
+    <a class="btn quiet" href="https://github.com/redp4w">Perfil GitHub <span aria-hidden="true">↗</span></a>
+  </div>
+  <div class="hero-line"><span>MODE: LEARNING</span><span>BLUE TEAM / RED TEAM / RESEARCH</span><span>{{ site.posts.size }} REGISTROS</span></div>
 </section>
-<section class="section">
-  <div class="section-heading"><div><span class="section-number">01 //</span><h2>Últimas publicações</h2></div><a class="text-link" href="{{ '/writeups/' | relative_url }}">Ver arquivo completo ↗</a></div>
-  <div class="post-grid">{% for post in site.posts limit: 4 %}{% include post-card.html post=post %}{% else %}<p class="empty-state">Publicações em preparação. O arquivo será atualizado conforme os laboratórios forem documentados.</p>{% endfor %}</div>
-</section>
-<section class="section">
-  <div class="section-heading"><div><span class="section-number">02 //</span><h2>Explore por trilha</h2></div></div>
-  <div class="track-grid">
-    <a class="track" href="{{ '/walkthroughs/' | relative_url }}"><span class="track-id">01 / LABS</span><strong>Walkthroughs <span>↗</span></strong><p>Passo a passo de laboratórios, exploração, enumeração e pós-exploração com contexto.</p></a>
-    <a class="track" href="{{ '/estudos/' | relative_url }}"><span class="track-id">02 / RESEARCH</span><strong>Estudos <span>↗</span></strong><p>Conceitos, protocolos, vulnerabilidades e análise defensiva organizados para consulta.</p></a>
-    <a class="track" href="{{ '/writeups/' | relative_url }}"><span class="track-id">03 / ARCHIVE</span><strong>Arquivo técnico <span>↗</span></strong><p>Todos os registros em ordem cronológica, com fontes e observações de laboratório.</p></a>
+<section class="section" aria-labelledby="recent-title">
+  <div class="section-heading"><div><span class="section-number">01 / RECENT</span><h2 id="recent-title">Últimas publicações</h2></div><a class="text-link" href="{{ '/arquivo/' | relative_url }}">Todas as notas ↗</a></div>
+  <div class="post-grid">
+    {% for post in site.posts limit: 4 %}
+      {% include post-card.html post=post %}
+    {% else %}
+      <p class="empty-state">Ainda não há artigos em <code>_posts/</code>.</p>
+    {% endfor %}
   </div>
 </section>
-<section class="signature"><span class="prompt">root@redp4w</span>:~$ cat philosophy.txt<br><span>Entender a falha. Reproduzir com autorização. Documentar a defesa.</span></section>
+<section class="section" aria-labelledby="topics-title">
+  <div class="section-heading"><div><span class="section-number">02 / SUBJECTS</span><h2 id="topics-title">Áreas de interesse</h2></div></div>
+  <!-- Áreas descritivas, não pastas ou páginas independentes. -->
+  <div class="track-grid">
+    <div class="track"><span class="track-id">01 / DEFEND</span><strong>SOC &amp; Blue Team</strong><p>Eventos, telemetria, investigação, resposta a incidentes e detecção.</p></div>
+    <div class="track"><span class="track-id">02 / EXPLORE</span><strong>Pentest &amp; Labs</strong><p>Enumeração, exploração e análise de vulnerabilidades em ambientes autorizados.</p></div>
+    <div class="track"><span class="track-id">03 / UNDERSTAND</span><strong>Sistemas &amp; Pesquisa</strong><p>Linux, Windows, redes, automação, governança e fundamentos técnicos.</p></div>
+  </div>
+</section>
+<section class="signature"><span class="prompt">redp4w@lab</span>:~$ cat README<br><span>Investigar. Entender. Documentar. Repetir.</span></section>
