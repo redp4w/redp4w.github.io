@@ -1,1 +1,26 @@
-
+# Validação independente do deploy automático do GitHub Pages.
+name: Validate security notes
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with GitHub Pages Jekyll
+        uses: actions/jekyll-build-pages@v1
+        with:
+          source: ./
+          destination: ./_site
+      - name: Check core pages and published JSON
+        run: |
+          test -f _site/index.html
+          test -f _site/arquivo/index.html
+          test -f _site/assets/css/style.css
+          test -f _site/assets/js/archive.js
+          python3 -m json.tool _site/latest.json >/dev/null
