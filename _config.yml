@@ -1,14 +1,19 @@
+# Identidade pública: manter somente o alias redp4w.
 title: 'redp4w // security notes'
-description: 'Writeups, walkthroughs e estudos em segurança ofensiva e defensiva por Jezer Ferreira.'
+description: 'Laboratórios, writeups, walkthroughs e estudos sobre segurança ofensiva e defensiva.'
 url: 'https://redp4w.github.io'
 baseurl: ''
 lang: pt-BR
 timezone: America/Sao_Paulo
+
+# Uma única coleção de artigos em _posts/. Categorias e tags são os metadados.
 markdown: kramdown
 highlighter: rouge
 permalink: /notes/:title/
-theme: jekyll-theme-hacker
 show_excerpts: true
+
+# O site usa layouts e CSS locais; não depende de um tema Jekyll externo.
+# Não adicione 'theme: hacker' nem 'theme: jekyll-theme-hacker'.
 exclude:
   - README.md
   - Gemfile

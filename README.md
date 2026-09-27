@@ -1,31 +1,44 @@
 # redp4w // security notes
 
-Portfólio técnico de [Jezer Ferreira](https://github.com/redp4w), publicado em <https://redp4w.github.io>.
+Publicações em https://redp4w.github.io — repositório da página e dos artigos.
+O [perfil do GitHub](https://github.com/redp4w) funciona como capa; o site concentra o conteúdo.
 
-O GitHub [redp4w/redp4w](https://github.com/redp4w/redp4w) é a apresentação; este repositório concentra writeups, walkthroughs e estudos. A rota `/latest.json` fornece as três publicações recentes para sincronização automatizada do perfil.
+## Publicar um artigo
 
-## Publicar uma nota
-
-Crie `_posts/AAAA-MM-DD-titulo.md` com front matter:
+Coloque **todos** os artigos em `_posts/`, independentemente do assunto. Não crie pastas
+separadas por tipo. Use um arquivo com nome `AAAA-MM-DD-titulo-curto.md` e este cabeçalho:
 
 ```yaml
 ---
 layout: post
-title: "Título da análise"
-description: "Resumo de uma linha."
-date: AAAA-MM-DD
-categories: [Estudos, Linux] # ou [TryHackMe, Linux], [HackTheBox, Windows]
-tags: [Linux, SOC]
+title: "TryHackMe — Nome da sala | Técnica estudada"
+description: "Resumo curto para o card da página inicial e do arquivo."
+date: 2026-09-27
+categories: [TryHackMe, Linux]  # metadados; não criam pastas
+# O filtro do site é gerado automaticamente a partir das tags de todos os artigos.
+tags: [Walkthrough, Linux, Privilege-Escalation]
 ---
+
+# Título visível do artigo
+
+Seu conteúdo em Markdown.
 ```
 
-Use uma introdução, ambiente, passos com evidências, resultado, detecção/mitigação e referências. Não publique flags de salas ativas, credenciais ou dados de terceiros.
+**Para um estudo:** mude `title`, `categories` e `tags`; mantenha-o em `_posts/`.
+A página `arquivo.md` listará todos os posts automaticamente. Os botões de filtro usam as tags.
+O link do post permanece em `/notes/titulo-curto/`.
 
-## Navegação e manutenção
+## Onde editar
 
-- `/writeups/`: arquivo completo.
-- `/walkthroughs/`: posts nas categorias TryHackMe, HackTheBox ou Walkthroughs.
-- `/estudos/`: posts nas categorias Estudos, Research ou Studies.
-- `/latest.json`: índice público usado pela rotina do README de perfil.
+- `_config.yml`: título, endereço e configuração Jekyll. Usa CSS/layouts locais, sem tema externo.
+- `_layouts/home.html`: texto da capa e áreas de interesse.
+- `_layouts/archive.html`: arquivo único, pesquisa e filtros automáticos.
+- `_layouts/post.html`: moldura de cada publicação.
+- `_includes/post-card.html`: aparência dos cards nas duas páginas.
+- `assets/css/style.css`: cores e estilos, organizados por seções comentadas.
+- `assets/js/archive.js`: busca e filtro (não precisa alterar para adicionar posts).
+- `latest.json`: exporta as três publicações mais recentes para o README do perfil.
 
-GitHub Pages publica a branch `main` usando Jekyll. A configuração usa o nome correto `jekyll-theme-hacker` e layouts/CSS próprios. As publicações já existentes em `_posts/` devem ser preservadas.
+Mantenha `_posts/2026-09-27-fragnesia.md`, bem como `assets/favicon.svg`.
+**Exclua** o antigo `writeups/index.md`; a página agora é `arquivo.md`.
+Se tiver criado `walkthroughs/` ou `estudos/` na tentativa anterior, exclua essas duas pastas de índice.
