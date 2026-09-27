@@ -1,0 +1,19 @@
+---
+layout: default
+---
+<section class="archive-intro"><div class="eyebrow">INDEX / {{ page.collection_filter | upcase | escape }}</div><h1>{{ page.title | escape }}<span class="cursor">_</span></h1><p>{{ page.description | escape }}</p><a class="text-link" href="{{ '/' | relative_url }}">← Voltar ao início</a></section>
+<section class="section"><div class="section-heading"><div><span class="section-number">/ ENTRADAS</span><h2>Biblioteca</h2></div></div><div class="post-grid">
+{% assign visible_count = 0 %}
+{% for post in site.posts %}
+  {% assign show_post = false %}
+  {% if page.collection_filter == 'all' %}{% assign show_post = true %}{% endif %}
+  {% if page.collection_filter == 'walkthroughs' %}
+    {% if post.categories contains 'TryHackMe' or post.categories contains 'HackTheBox' or post.categories contains 'Walkthroughs' %}{% assign show_post = true %}{% endif %}
+  {% endif %}
+  {% if page.collection_filter == 'studies' %}
+    {% if post.categories contains 'Estudos' or post.categories contains 'Research' or post.categories contains 'Studies' %}{% assign show_post = true %}{% endif %}
+  {% endif %}
+  {% if show_post %}{% include post-card.html post=post %}{% assign visible_count = visible_count | plus: 1 %}{% endif %}
+{% endfor %}
+{% if visible_count == 0 %}<p class="empty-state">Nenhum registro publicado nesta trilha ainda. Confira o <a href="{{ '/writeups/' | relative_url }}">arquivo completo</a>.</p>{% endif %}
+</div></section>
