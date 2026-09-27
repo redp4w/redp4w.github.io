@@ -1,0 +1,14 @@
+title: "Security Research & Writeups"
+description: "Cybersecurity, SOC, Pentesting and TryHackMe Labs"
+
+theme: minima
+
+url: "https://redp4w.github.io"
+baseurl: ""
+
+lang: pt-BR
+
+show_excerpts: true
+
+header_pages:
+  - about.md
