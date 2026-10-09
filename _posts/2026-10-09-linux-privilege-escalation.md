@@ -15,9 +15,9 @@ tags: [linux, privilege-escalation, sudo, ld-preload, suid, path-hijacking, capa
 
 Neste estudo, reuni os exercícios de **Linux Privilege Escalation** do TryHackMe para entender como configurações inseguras permitem que um usuário comum, como <code>john</code>, obtenha privilégios de <code>root</code>.
 
-Não é apenas uma coleção de comandos: o ponto principal é **identificar qual permissão está errada, entender por que ela é perigosa e testar a hipótese**. Organizei seis vetores, os erros que encontrei nas VMs, as verificações de sucesso e as formas de corrigir as falhas.
+O ponto principal é **identificar qual permissão está errada, entender por que ela é perigosa e testar a hipótese**. Organizei seis vetores, os erros que encontrei nas VMs, as verificações de sucesso e as formas de corrigir as falhas.
 
-> **Escopo:** os comandos foram usados ou discutidos em VMs autorizadas do TryHackMe. Não execute alterações de autenticação, arquivos SUID ou compartilhamentos NFS em sistemas sem autorização. Os IPs das VMs são temporários e podem mudar após um reset.
+> **Escopo:** os comandos foram usados em VMs autorizadas. Não execute alterações de autenticação, arquivos SUID ou compartilhamentos NFS em sistemas sem autorização. Os IPs das VMs são temporários e podem mudar após um reset.
 
 ### Índice rápido
 
