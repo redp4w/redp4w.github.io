@@ -692,7 +692,7 @@ Depois, conforme os indícios:
 | <code>nc -lvnp PORTA</code> | Aguarda conexões TCP na porta escolhida |
 | <code>bash -i</code> | Abre Bash interativo |
 | <code>/dev/tcp/IP/PORTA</code> | Abre conexão TCP com redirecionamento do Bash |
-| <code>>&</code> / <code>0>&1</code> | Redireciona fluxos de saída/entrada para a conexão |
+| <code>&gt;&amp;</code> / <code>0&gt;&amp;1</code> | Redireciona fluxos de saída/entrada para a conexão |
 | <code>cat &gt;&gt; arquivo &lt;&lt;'EOF'</code> | Acrescenta bloco de texto diretamente no terminal |
 | <code>find ... -writable -printf '%M %u:%g %p\n'</code> | Lista arquivos graváveis com permissões, dono, grupo e caminho |
 | <code>2>/dev/null</code> | Esconde mensagens de erro do comando |
