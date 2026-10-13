@@ -1,6 +1,6 @@
 ---
 layout: post
-title: "Jump - Do Recon ao Root: FTP, Reverse Shell e PrivEsc"
+title: "Linux Jump - Do Recon ao Root: FTP, Reverse Shell e PrivEsc"
 description: "Walkthrough da room Jump do TryHackMe: metodologia de reconhecimento, validação de hipóteses, execução de scripts via FTP, enumeração Linux, PATH Hijacking e escalação até root."
 date: 2026-10-13
 categories: [walkthrough, pentest, tryhackme]
