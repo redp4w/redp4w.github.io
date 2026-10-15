@@ -398,9 +398,43 @@ THM{s3rv1c3_b1n4ry_h1j4ck3d}
 
 ## 7. Novo recon: svcadmin → SYSTEM por script gravável
 
-Com `svcadmin`, executei novamente `whoami /all`. O token não tinha `SeImpersonatePrivilege` nem `SeDebugPrivilege`. Possuía `SeCreateGlobalPrivilege`, mas **criar certos objetos globais não concede SYSTEM automaticamente**.
+Com `svcadmin`, executei `whoami /all` de novo. O token não tinha `SeImpersonatePrivilege` nem `SeDebugPrivilege`. Possuía `SeCreateGlobalPrivilege`, que permite criar alguns objetos globais, mas **não concede SYSTEM automaticamente**.
 
-Busquei serviços `LocalSystem` e tarefas agendadas. Não encontrei uma configuração explorável nessas listagens. Um arquivo em `C:\Windows\Tasks` chamou atenção:
+### Buscar serviços LocalSystem
+
+**LocalSystem** é uma conta interna muito privilegiada do Windows, também chamada `NT AUTHORITY\SYSTEM`. Um serviço pode ser executado com ela mesmo sem haver usuário logado.
+
+No PowerShell:
+
+~~~powershell
+Get-CimInstance Win32_Service |
+  Where-Object { $_.StartName -eq 'LocalSystem' -and $_.PathName -notmatch '\\Windows\\(System32|SysWOW64)\\' } |
+  Select-Object Name,State,StartMode,PathName | Format-List
+~~~
+
+- `Get-CimInstance Win32_Service` enumera serviços;
+- `StartName -eq 'LocalSystem'` procura serviços com a identidade SYSTEM;
+- `PathName -notmatch` exclui os caminhos mais comuns de binários do Windows para reduzir a saída;
+- `Select-Object` mostra nome, estado, tipo de inicialização e executável.
+
+Apareceram serviços da AWS, Windows Defender e `TrustedInstaller`, mas sem uma falha aproveitável confirmada. **Estar fora de System32 não significa ser vulnerável:** é preciso verificar permissões.
+
+### Buscar tarefas agendadas executadas como SYSTEM
+
+~~~powershell
+Get-ScheduledTask |
+  Where-Object { $_.Principal.UserId -in @('SYSTEM','S-1-5-18') } |
+  Select-Object TaskName,TaskPath,Actions | Format-List
+~~~
+
+- `Get-ScheduledTask` lista as tarefas agendadas;
+- `Principal.UserId` é a identidade configurada para executá-las;
+- `S-1-5-18` é o SID (identificador de segurança) de SYSTEM;
+- `Actions` mostra ações. `{MSFT_TaskExecAction}` indica o tipo, mas não detalha necessariamente os comandos.
+
+Não encontrei uma tarefa explorável nessa listagem inicial. Então procurei arquivos locais que `svcadmin` pudesse modificar e que outro processo pudesse executar.
+
+Um arquivo em `C:\Windows\Tasks` chamou atenção:
 
 ~~~cmd
 dir C:\Windows\Tasks /a
@@ -450,7 +484,56 @@ nt authority\system
 
 O arquivo de prova foi atualizado às 13:25 no horário da VM. Isso **comprova a execução como SYSTEM**.
 
-Procurei referências ao script em `schtasks`, `Get-ScheduledTask`, arquivos de definição em `System32\Tasks` e serviços; as pesquisas retornaram vazias. A consulta ao histórico do Task Scheduler também não identificou o responsável. **Portanto, não consegui descobrir qual mecanismo disparava o script**. Seria incorreto atribuir a execução a uma tarefa específica sem evidência.
+### Investigar o que executou o script
+
+Não encontrei o nome da tarefa responsável. Primeiro busquei a referência no CMD:
+
+~~~cmd
+schtasks /query /fo LIST /v | findstr /i "cleanup"
+~~~
+
+`/query` consulta; `/fo LIST` organiza em lista; `/v` exibe detalhes. Surgiram nomes de tarefas padrão com “cleanup”, mas nenhuma referência a `cleanup.bat`.
+
+Depois, no **PowerShell**, pesquisei as ações das tarefas:
+
+~~~powershell
+Get-ScheduledTask | Where-Object {
+  $_.Actions.Execute -match 'cleanup\.bat' -or
+  $_.Actions.Arguments -match 'cleanup\.bat'
+} | Select-Object TaskName,TaskPath,Actions,Principal | Format-List
+~~~
+
+Como a saída ficou vazia, examinei os arquivos de definição das tarefas:
+
+~~~powershell
+Get-ChildItem C:\Windows\System32\Tasks -Recurse -File -ErrorAction SilentlyContinue |
+  Select-String -Pattern 'cleanup\.bat' -ErrorAction SilentlyContinue |
+  Select-Object Path,Line
+~~~
+
+Também conferi se algum serviço apontava para esse arquivo ou diretório:
+
+~~~powershell
+Get-CimInstance Win32_Service |
+  Where-Object { $_.PathName -match 'cleanup|Tasks' } |
+  Select-Object Name,StartName,PathName
+~~~
+
+Nenhuma consulta identificou o responsável. Por último, verifiquei o histórico do Agendador perto do horário observado:
+
+~~~powershell
+$t = (Get-Item C:\Users\Public\cleanup-proof.txt).LastWriteTime
+Get-WinEvent -FilterHashtable @{
+  LogName = 'Microsoft-Windows-TaskScheduler/Operational'
+  StartTime = $t.AddMinutes(-3)
+  EndTime = $t.AddMinutes(3)
+  Id = 100,200,201
+} -ErrorAction SilentlyContinue | Select-Object TimeCreated,Id,Message | Format-List
+~~~
+
+Os IDs `100`, `200` e `201` registram eventos relacionados ao início de tarefa e execução/conclusão de ações. Nessa consulta não apareceram eventos úteis.
+
+**O que foi comprovado:** o arquivo de prova mudou de `PENDING` para `nt authority\system`. Isso confirma **quem executou**, mas não identifica **qual mecanismo disparou**. Não atribuo a um agendamento específico sem evidência.
 
 A primeira prova tentou usar `C:\Windows\Temp`, mas o acesso negado não permitiu interpretar o resultado. Mudei para `C:\Users\Public`, onde pude consultar o arquivo. Também evitei adicionar várias vezes a mesma linha com `>>`/`Add-Content`, pois esses operadores acrescentam conteúdo.
 
@@ -501,7 +584,7 @@ whoami
 type C:\flag4.txt
 ~~~
 
-A flag final estava em `C:\flag4.txt`, inacessível para `svcadmin`. **O valor da flag4 não foi registrado na conversa; não vou inventá-lo.** O acesso SYSTEM foi confirmado na conclusão da room.
+A flag final estava em `C:\flag4.txt`, inacessível para `svcadmin`. **Objetivo concluído: acesso como SYSTEM confirmado.**
 
 **Diferença importante:** o token da sessão `svcadmin` não virou SYSTEM; o script executado por SYSTEM criou **outro processo**, com outra identidade.
 
