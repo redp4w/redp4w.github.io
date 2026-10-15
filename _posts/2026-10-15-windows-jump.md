@@ -590,44 +590,155 @@ A flag final estava em `C:\flag4.txt`, inacessível para `svcadmin`. **Objetivo 
 
 ---
 
-## 8. Checklist reutilizável para outras rooms
+## 8. Checklist geral para próximas rooms
 
-| Fase | Pergunta | Ferramenta ou comando |
+Este checklist não depende da solução da Windows Jump. A ordem é: **recon externo → identificar serviços → obter acesso → enumerar por dentro → investigar permissões → comprovar → repetir**. Use os comandos conforme o sistema e as portas encontrados.
+
+| Fase | Pergunta | Ferramentas e comandos úteis |
 |---|---|---|
-| Recon externo | Quais portas existem? | `nmap -p-`, `-sV -sC` |
-| SMB | Há guest/anônimo? Que arquivos posso ler? | `smbclient`, `netexec smb --shares` |
-| Primeiro acesso | Quem sou e quais grupos/privilégios? | `whoami /all`, `net user`, `net localgroup` |
-| Credenciais | Há senhas no Registro ou arquivos? | `reg query ...Winlogon`, `cmdkey /list` |
-| Novo usuário | Posso abrir sessão, executar RunAs ou WinRM? | `xfreerdp`, `runas`, `netexec` |
-| Serviços | Qual conta executa e quem modifica o binário? | `wmic service`, `sc qc`, `icacls` |
-| Scripts/tarefas | Quem escreve? Quem executa? Quando? | `icacls`, `schtasks`, `Get-ScheduledTask` |
-| Prova | O comando rodou com qual identidade? | `whoami` gravado em arquivo, `getuid` |
-| Pós-exploit | O que o novo acesso permite? | Repetir enumeração e verificar a flag |
+| Recon inicial | Qual é o alvo, IP, sistema, domínio, hostname e contexto? | `nmap -p-`, `-sV -sC`, `nslookup`, `dig`, `whois` (quando aplicável), `curl -I` |
+| Analisar serviços | O que fazer com as portas abertas? | SMB: `smbclient`, `netexec`; HTTP: `curl`, `whatweb`, `ffuf`; RPC: `rpcclient`; FTP: `ftp`; SSH: `ssh`; WinRM: `evil-winrm`; RDP: `xfreerdp`; LDAP/AD: `ldapsearch`, `netexec ldap` |
+| Acesso anônimo | Quais arquivos, usuários ou shares posso descobrir sem credenciais? | `smbclient -L //IP -N`, `netexec smb IP -u guest -p '' --shares`, enumeração anônima específica do protocolo |
+| Credenciais encontradas | A qual protocolo e tipo de logon essa senha dá acesso? | `netexec smb`, `xfreerdp`, `evil-winrm`, `runas`, conforme permissões e serviços |
+| Primeiro acesso | Quem sou? Quais grupos, privilégios, sistema e rede? | Windows: `whoami /all`, `net user`, `net localgroup`, `hostname`, `systeminfo`, `ipconfig /all`; Linux: `id`, `uname -a`, `sudo -l` |
+| Privilégios | Esse direito pode ser aproveitado? Com quais pré-requisitos? | `whoami /priv`, Microsoft Learn, Priv2Admin, WinPEAS, PrivescCheck; Linux: GTFOBins |
+| Credenciais locais | Onde há senhas em perfis, Registro, configurações ou scripts? | `reg query ...Winlogon`, `cmdkey /list`, `dir /s /b`, `Get-ChildItem`, `Select-String` |
+| Serviços e processos | Qual conta executa? Posso modificar arquivo, pasta ou configuração? | `Get-CimInstance Win32_Service`, `wmic service`, `sc qc`, `sc sdshow`, `icacls` |
+| Scripts e tarefas | Quem escreve, quem executa e o que dispara? | `Get-ScheduledTask`, `schtasks /query /fo LIST /v`, `icacls`, `Get-WinEvent` |
+| Prova de execução | Meu arquivo foi só alterado ou foi realmente executado? Por quem? | Gravar `whoami` em arquivo, consultar horário e logs, confirmar via `getuid` |
+| Pós-exploit | O que mudou com o novo usuário? Qual objetivo falta? | Repetir a enumeração local, conferir permissões e obter a evidência do objetivo |
+| Encerramento | Posso restaurar os arquivos e retirar artefatos? | Restaurar cópias originais, remover testes e fechar listeners |
 
-### Referência rápida: siglas e operadores
+### 8.1 Encontrei um privilégio: onde pesquisar?
 
-| Comando / sintaxe | Significado |
+Execute `whoami /priv` e copie o nome exato do direito, por exemplo `SeBackupPrivilege`. Para entender se ele ajuda no contexto atual:
+
+- [Microsoft Learn — User Rights Assignment](https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/security-policy-settings/user-rights-assignment): explicações oficiais, requisitos e riscos de cada direito Windows.
+- [Priv2Admin](https://github.com/gtworek/Priv2Admin): consulta rápida de privilégios Windows e possíveis caminhos de escalação.
+- [PrivescCheck](https://github.com/itm4n/PrivescCheck): verificação de configurações e permissões locais.
+- [WinPEAS / PEASS-ng](https://github.com/peass-ng/PEASS-ng): enumeração mais ampla quando a análise manual não encontra um caminho.
+- [LOLBAS](https://lolbas-project.github.io/): binários e scripts legítimos Windows com funcionalidades relevantes.
+- [GTFOBins](https://gtfobins.github.io/): equivalente útil para abusos de programas em Linux.
+
+**Como decidir:** `Enabled` é privilégio presente e habilitado; `Disabled` é presente, mas desabilitado naquele momento; ausente significa que não está no token. Mesmo habilitado, um direito só é útil quando as demais condições da técnica estão presentes. Não conclua que um nome `Se...Privilege` significa acesso automático a SYSTEM.
+
+### 8.2 Procurar arquivos e credenciais sem listar o disco inteiro
+
+No CMD, comece pelos perfis e pastas de aplicações:
+
+~~~cmd
+dir C:\Users\*pass* /s /b 2>nul
+dir C:\Users\*cred* /s /b 2>nul
+dir C:\ProgramData\*.config /s /b 2>nul
+~~~
+
+- `/s` busca nas subpastas; `/b` mostra somente caminhos; `2>nul` oculta erros de acesso.
+- Limitar a pasta torna a busca mais rápida e diminui falsos positivos.
+
+Se quiser **buscar palavras no conteúdo** de arquivos de texto ou configuração, no PowerShell:
+
+~~~powershell
+Get-ChildItem 'C:\Users\thmuser' -Recurse -File -Include *.txt,*.ini,*.xml,*.config,*.ps1 -ErrorAction SilentlyContinue |
+  Select-String -Pattern 'password|passwd|credential|secret|token' -List -ErrorAction SilentlyContinue |
+  Select-Object Path,LineNumber,Line
+~~~
+
+`-Recurse` entra nas subpastas, `-Include` seleciona extensões, `Select-String` busca palavras, `-List` retorna somente a primeira correspondência por arquivo. Substitua a pasta por aquela relacionada ao serviço encontrado. Investigue também arquivos de backup, compartilhamentos, `C:\Users\Public` e pastas próprias das aplicações.
+
+Para verificar credenciais do Registro e do Credential Manager:
+
+~~~cmd
+reg query "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
+cmdkey /list
+~~~
+
+### 8.3 Como encontrar serviços suspeitos?
+
+No PowerShell, liste a conta e o caminho executável de cada serviço:
+
+~~~powershell
+Get-CimInstance Win32_Service |
+  Select-Object Name,State,StartMode,StartName,PathName
+~~~
+
+Se precisar filtrar serviços executados como SYSTEM:
+
+~~~powershell
+Get-CimInstance Win32_Service |
+  Where-Object { $_.StartName -eq 'LocalSystem' } |
+  Select-Object Name,State,PathName
+~~~
+
+Ao encontrar um candidato, examine **somente aquele serviço** no CMD:
+
+~~~cmd
+sc qc NOME_SERVICO
+sc query NOME_SERVICO
+sc sdshow NOME_SERVICO
+icacls "C:\CAMINHO\programa.exe"
+~~~
+
+- `sc qc`: configuração e conta;
+- `sc query`: estado;
+- `sc sdshow`: quem tem direitos sobre o serviço;
+- `icacls`: quem tem direitos sobre o arquivo.
+
+Um caminho executado como `LocalSystem` **não basta** para escalar: é preciso descobrir uma permissão indevida, um gatilho real e comprovar a execução.
+
+### 8.4 Como encontrar tarefas e scripts?
+
+No CMD:
+
+~~~cmd
+schtasks /query /fo LIST /v
+~~~
+
+No PowerShell:
+
+~~~powershell
+Get-ScheduledTask | Select-Object TaskName,TaskPath,State,Principal,Actions
+~~~
+
+Para inspecionar uma tarefa identificada:
+
+~~~powershell
+Get-ScheduledTask -TaskName 'NOME_DA_TAREFA' |
+  Select-Object -ExpandProperty Actions
+~~~
+
+Agora pergunte: **quem executa?** (`Principal`), **o que é executado?** (`Actions`), **quando?** (`Triggers`) e **quem consegue modificar esse arquivo?** (`icacls`).
+
+Uma tarefa pode rodar por **horário, logon, inicialização do Windows, evento ou condição**. Também podem existir automações executadas por serviços ou outros programas fora das tarefas visíveis ao usuário.
+
+### 8.5 Conceitos rápidos: serviços, contas e permissões
+
+| Termo | Significado | Como verificar |
+|---|---|---|
+| Serviço Windows | Programa de segundo plano controlado pelo SCM; geralmente não depende de uma sessão gráfica ativa | `sc qc`, `sc query` |
+| Conta do serviço | Conta cujo token será usado pelo processo do serviço | `SERVICE_START_NAME` ou `StartName` |
+| LocalSystem / SYSTEM | Conta interna de alto privilégio (SID `S-1-5-18`) | `StartName`, `whoami` |
+| Tarefa agendada | Ação com gatilho e conta executora configurada | `Get-ScheduledTask` |
+| ACL / ACE | Lista de controle de acesso / uma entrada individual | `icacls` em arquivos; `sc sdshow` em serviços |
+| Token | Identidade, grupos e privilégios de um processo | `whoami /all` |
+| RunAs | Inicia outro processo autenticado como outra conta; não muda o usuário do processo anterior | `runas /user:... cmd.exe` |
+| RDP / WinRM | Desktop remoto / execução remota PowerShell com permissões próprias | `xfreerdp`, `evil-winrm` |
+
+### 8.6 Operadores e parâmetros mais usados
+
+| Sintaxe | Função |
 |---|---|
-| SMB / RDP / RPC / WinRM | Compartilhamento / Desktop remoto / procedimento remoto / gerenciamento remoto |
-| ACL / SDDL | Lista de controle de acesso / formato do descritor de segurança |
-| `sc qc`, `sc query`, `sc start` | Configuração, estado e inicialização de serviço |
-| `icacls` | Mostra permissões de arquivos e diretórios Windows |
-| `wmic ... \| findstr /i` | Filtra resultados sem diferenciar maiúsculas de minúsculas |
-| `>`, `>>` | Sobrescreve e acrescenta saída a arquivo |
-| `2>&1` | Redireciona erros para a saída normal |
+| `\|` | Envia a saída ao comando seguinte |
+| `findstr /i` | Filtra texto ignorando maiúsculas/minúsculas |
+| `>` e `>>` | Sobrescreve / acrescenta conteúdo |
+| `2>&1` | Direciona erros para a mesma saída |
 | `2>nul` | Descarta erros no CMD |
-| `exe-service` / `exe` | Formato próprio para serviço / executável Windows comum |
-| `Invoke-WebRequest -OutFile` | Baixa conteúdo e salva em arquivo |
-| `multi/handler` | Listener para receber a conexão reversa |
+| `-ErrorAction SilentlyContinue` | Oculta erros não terminantes no PowerShell |
+| `-NoProfile` | Abre PowerShell sem executar perfis |
+| `msfconsole -q` | Inicia o Metasploit sem banner (`quiet`) |
+| `msfvenom -f exe-service` / `-f exe` | Executável de serviço / executável comum |
+| `LHOST` / `LPORT` | Endereço e porta de retorno do payload |
 
-**Dicas que ficaram:**
-
-- Não pular recon após cada usuário: cada nova identidade muda as permissões disponíveis.
-- Validar credenciais antes de atribuir a falha do RDP à senha.
-- Ler permissões antes de gerar payloads; o `Everyone:(F)` no serviço era decisivo.
-- Diferenciar serviço iniciado, payload executado e identidade comprovada.
-- Não confundir um script gravável com execução privilegiada até aparecer uma prova (`whoami`).
-- Se uma busca por tarefas retornar vazia, isso não prova que o script nunca é executado.
+**Regra:** antes de executar um payload, confirme **a identidade do processo, a permissão que permite a modificação e o mecanismo que executa o arquivo**.
 
 ### Mitigação e limpeza
 
