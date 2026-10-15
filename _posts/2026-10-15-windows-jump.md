@@ -226,13 +226,19 @@ Validei a credencial no SMB:
 netexec smb 10.64.185.84 -u notadmin -p 'P@ssw0rd!'
 ~~~
 
-O login RDP de `notadmin` falhou com *Connection reset by peer*. Como a senha já tinha funcionado no SMB, usei **RunAs** dentro da sessão que possuía como `thmuser`:
+O RDP de `notadmin` falhou com *Connection reset by peer*. Como a senha já tinha funcionado no SMB, usei o **RunAs** no CMD da minha sessão `thmuser`:
 
 ~~~cmd
 runas /user:PRIVESC\notadmin cmd.exe
 ~~~
 
-Depois de informar a senha, abriu um novo CMD como `notadmin`:
+**O que é RunAs?** É uma ferramenta nativa do Windows que inicia **um novo processo com as credenciais de outra conta**. O Windows verifica a senha e cria o processo com o token de segurança de `notadmin`. O CMD anterior continua sendo de `thmuser`.
+
+- `/user:PRIVESC\notadmin`: conta local `notadmin` do computador `PRIVESC`.
+- `cmd.exe`: programa que será aberto com a identidade informada.
+- A senha é solicitada depois; não precisa aparecer no comando.
+
+**Por que funcionou?** A conta pôde iniciar um processo local mesmo sem conseguir abrir outra sessão RDP. Ter senha válida não garante autorização para entrar pelo Remote Desktop: cada tipo de logon pode ter restrições próprias. RunAs também não concede privilégios além dos que a outra conta já possui.
 
 ~~~cmd
 whoami
@@ -244,13 +250,13 @@ privesc\notadmin
 THM{w1nl0g0n_cr3ds_3xp0s3d}
 ~~~
 
-**Aprendizado:** credencial válida não garante permissão de RDP. `runas` permite iniciar um processo usando outra conta, sem abrir outra sessão gráfica remota.
+**Aprendizado:** um serviço remoto recusou a sessão, mas isso não invalidou a credencial. A confirmação da identidade no novo CMD foi fundamental.
 
 ---
 
 ## 6. Novo recon: notadmin → svcadmin por Service Binary Hijacking
 
-Com `notadmin`, voltei à enumeração. O nome `svcadmin` sugeria uma conta usada por serviço:
+Com `notadmin`, recomecei a enumeração: queria descobrir **se algum serviço era executado como `svcadmin`**.
 
 ~~~cmd
 net user svcadmin
@@ -264,6 +270,12 @@ Serviço: THMSvc
 Binário:  C:\Windows\THMSVC\svc.exe
 Conta:    .\svcadmin
 ~~~
+
+### O que é um serviço Windows?
+
+É um programa de segundo plano gerenciado pelo **Service Control Manager (SCM)**. Pode iniciar automaticamente, sob demanda ou por evento, sem ninguém abrir o desktop. Em geral, sua configuração pertence à **máquina**, mas o processo é executado com uma **conta de segurança**, como `LocalSystem`, `LocalService`, `NetworkService` ou uma conta local/de domínio.
+
+`.\svcadmin` **não** significa que o programa só roda quando esse usuário abre uma sessão RDP. Significa que o Windows inicia o processo usando a identidade `svcadmin`. Para descobrir a conta de execução, observe `SERVICE_START_NAME` em `sc qc` (ou `StartName` via PowerShell).
 
 Inspecionei configurações, estado e permissões:
 
@@ -285,7 +297,31 @@ C:\Windows\THMSVC\svc.exe Everyone:(F)
                           PRIVESC\notadmin:(I)(F)
 ~~~
 
-`(F)` significa **controle total**. Também havia a ACE ` (A;;RPWP;;;BU) ` no descritor SDDL do serviço: `BU` é o grupo **BUILTIN\Users**, `RP` permite iniciar e `WP` permite parar o serviço.
+Na saída de `sc qc THMSvc`, os campos significam:
+
+| Campo | Leitura |
+|---|---|
+| `TYPE: 10 WIN32_OWN_PROCESS` | Serviço com processo próprio |
+| `START_TYPE: 3 DEMAND_START` | Início sob demanda |
+| `SERVICE_START_NAME: .\svcadmin` | Executa como a conta local `svcadmin` |
+| `STATE: STOPPED` | Estava parado durante o teste |
+
+No `icacls`, `(F)` significa **controle total** sobre o arquivo ou pasta (permissão NTFS).
+
+Já `sc sdshow THMSvc`, que executei logo acima, exibiu o **descritor de segurança do serviço**. Um trecho **da saída real** foi:
+
+~~~text
+(A;;RPWP;;;BU)
+~~~
+
+| Campo | Significado nesse SDDL |
+|---|---|
+| `A` | *Allow*: entrada que permite ações |
+| `RP` | Direito de iniciar o serviço (*SERVICE_START*) |
+| `WP` | Direito de parar o serviço (*SERVICE_STOP*) |
+| `BU` | Grupo `BUILTIN\Users` |
+
+**ACE** é uma entrada de controle de acesso; **SDDL** é a linguagem textual usada para representar descritores de segurança. Ou seja, **`icacls` mostrou quem podia alterar o binário; `sc sdshow` mostrou quem podia controlar o serviço**. São permissões diferentes.
 
 **Vulnerabilidade:** `notadmin` pode modificar `svc.exe`; o Windows o executa como `svcadmin`; e o serviço pode ser iniciado. É **Service Binary Hijacking**.
 
@@ -309,6 +345,8 @@ O primeiro payload que tentei era `-f exe` e abriu sessão rapidamente, mas morr
 ~~~bash
 msfconsole -q
 ~~~
+
+`-q` é *quiet*: abre o Metasploit sem o banner inicial. Não desativa o handler ou as mensagens das sessões.
 
 ~~~text
 use exploit/multi/handler
