@@ -9,6 +9,8 @@
   if (search) {
     const items = Array.from(document.querySelectorAll("#glossary-list [data-glossary-search]"));
     const count = document.querySelector("#glossary-count");
+    const queryInUrl = new URLSearchParams(window.location.search).get("q");
+    if (queryInUrl) search.value = queryInUrl;
     const update = () => {
       const query = search.value.trim().toLocaleLowerCase("pt-BR");
       let visible = 0;
@@ -150,7 +152,7 @@
       cat.textContent = entry.categoria || "Glossário";
       title.textContent = entry.termo;
       desc.textContent = entry.descricao;
-      more.href = "/glossario/#"+slug(entry.termo);
+      more.href = "/glossario/?q=" + encodeURIComponent(entry.termo);
       if (typeof entry.link==="string" && /^https?:\/\//i.test(entry.link)) {
         external.href=entry.link; external.hidden=false;
       } else {external.removeAttribute("href");external.hidden=true;}
