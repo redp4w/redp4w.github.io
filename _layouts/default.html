@@ -25,6 +25,7 @@
       <nav class="nav" aria-label="Navegação principal">
         <a href="{{ '/' | relative_url }}" {% if page.url == '/' %}aria-current="page"{% endif %}>Início</a>
         <a href="{{ '/arquivo/' | relative_url }}" {% if page.url == '/arquivo/' %}aria-current="page"{% endif %}>Arquivo</a>
+        <a href="{{ '/glossario/' | relative_url }}" {% if page.url == '/glossario/' %}aria-current="page"{% endif %}>Glossário</a>
         <a href="https://github.com/redp4w" target="_blank" rel="noopener noreferrer">GitHub ↗</a>
       </nav>
     </div>
@@ -34,5 +35,7 @@
     <span><span class="prompt">$</span> learn --investigate --document --defend</span>
     <span><a href="https://github.com/redp4w">Perfil GitHub</a> <span class="divider-mark">/</span> <a href="https://tryhackme.com/p/probablyacat">TryHackMe</a></span>
   </footer>
+  <!-- Arquivo de dados gerado pelo Jekyll a partir de _data/glossary.yml. -->
+  <script defer src="{{ '/assets/js/glossary.js' | relative_url }}" data-glossary-url="{{ '/assets/data/glossary.json' | relative_url }}"></script>
 </body>
 </html>
