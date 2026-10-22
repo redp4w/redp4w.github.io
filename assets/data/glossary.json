@@ -1,0 +1,5 @@
+---
+layout: null
+permalink: /assets/data/glossary.json
+---
+{{ site.data.glossary | jsonify }}
