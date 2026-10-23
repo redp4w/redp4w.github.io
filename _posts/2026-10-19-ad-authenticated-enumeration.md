@@ -1,7 +1,7 @@
 ---
 layout: post
 title: "Active Directory (AD DS) - Guia prático de enumeração e autenticação"
-description: "Guia completo e didático de Active Directory: network, user e domain enumeration, SMB, RPC, LDAP, password spraying, AS-REP Roasting, CMD, PowerShell, PowerView e BloodHound."
+description: "Guia de enumeração Active Directory do básico ao autenticado: rede, DNS, SMB, LDAP, RPC, CMD, PowerShell, PowerView, Kerberos, ACLs e BloodHound CE."
 date: 2026-10-19
 categories: [guia, pentest, windows, tryhackme]
 tags: [active-directory, ad-ds, enumeration, nmap, smb, rpcclient, ldap, kerbrute, password-spraying, kerberos, as-rep-roasting, impacket, hashcat, powershell, powerview, bloodhound]
@@ -12,6 +12,24 @@ tags: [active-directory, ad-ds, enumeration, nmap, smb, rpcclient, ldap, kerbrut
 Este guia reúne meus exercícios e aprendizados das rooms **Network Enumeration**, **User/Domain Enumeration**, **Password Spraying** e **Authenticated Enumeration** do TryHackMe. A sequência é a que eu usaria para começar uma avaliação de um domínio Windows.
 
 > Material para laboratórios e ambientes expressamente autorizados. Algumas verificações de autenticação podem bloquear contas ou gerar alertas.
+
+
+<a id="indice"></a>
+
+## Índice
+
+Este guia está dividido em blocos que acompanham a evolução do acesso: **primeiro identifico a rede, depois consulto o domínio, enumero com credenciais e finalmente analiso relações de privilégio**. Os comandos usam placeholders para funcionar em outras rooms.
+
+| Bloco | Etapas |
+|---|---|
+| **1. Enumeração básica — rede e domínio** | [1. Preparação](#1-entender-a-rede-e-preparar-o-laboratório) · [2. Rede e serviços](#2-network-enumeration---descobrir-hosts-e-serviços) · [3. Usuários](#3-user-enumeration---descobrir-usuários-sem-login) · [4. Grupos e relações](#4-domain-enumeration---grupos-e-pertencimento) |
+| **2. Autenticação e Kerberos** | [5. Políticas e spraying](#5-password-spraying---primeiro-a-política-de-senhas) · [6. AS-REP e Kerberoasting](#6-as-rep-roasting---testar-contas-sem-pré-autenticação) |
+| **3. Enumeração autenticada — Windows e AD** | [7. CMD, serviços e tarefas](#7-authenticated-enumeration---cmd-na-estação-wrk) · [8. ActiveDirectory no PowerShell](#8-powershell-e-módulo-activedirectory) · [9. PowerView](#9-powerview---mais-consultas-sobre-o-domínio) |
+| **4. Relações e priorização** | [10. BloodHound](#10-bloodhound---mapear-relações-e-privilégios) · [11. Checklist](#11-checklist-geral-para-os-próximos-laboratórios) |
+
+**Regra prática:** uma enumeração pode mostrar **o que existe**; a análise de ACLs e relacionamentos ajuda a descobrir **o que minha identidade pode realmente acessar ou controlar**.
+
+> **BLOCO 1 · Enumeração básica** — escopo de rede, DNS, portas, serviços, SMB, LDAP e RPC; sempre verificando se a consulta exige login.
 
 ## 1. Entender a rede e preparar o laboratório
 
@@ -138,6 +156,22 @@ smb: \> exit
 ~~~
 
 **Aprendizado:** listar um share não garante autorização para abrir ou baixar todos os arquivos.
+
+
+### 2.4 Resolver nomes e identificar o controlador de domínio
+
+Quando Nmap indica LDAP e Kerberos, verifico os registros de serviço DNS:
+
+~~~bash
+nslookup -type=SRV _ldap._tcp.dc._msdcs.<DOMAIN> <DC_IP>
+nslookup -type=SRV _kerberos._tcp.<DOMAIN> <DC_IP>
+~~~
+
+- <code>SRV</code>: registro DNS que informa host e porta de um serviço.
+- <code>_ldap._tcp.dc._msdcs</code>: localiza controladores de domínio LDAP.
+- <code>_kerberos._tcp</code>: identifica serviços Kerberos do domínio.
+
+Para ferramentas baseadas em nomes, como Kerberos e BloodHound, a resolução correta de <code>dc01.exemplo.local</code> é tão importante quanto o IP. Ajusto DNS do laboratório e, se necessário, o arquivo <code>/etc/hosts</code> — apenas para nomes realmente identificados, sem inventar hosts.
 
 ---
 
@@ -336,6 +370,21 @@ Essas consultas **não são intercambiáveis**:
 
 Também observei **21** grupos com <code>net group /domain</code>, **54** com <code>Get-ADGroup -Filter *</code> e **58** na coleta BloodHound. Eles podem diferir porque <code>net group</code> lista principalmente grupos globais, enquanto o cmdlet AD retorna múltiplos escopos e o coletor possui regras/escopo próprios. Não usar um número de uma ferramenta para responder à pergunta referente a outra sem verificar seu escopo. Os valores são registros do exercício, não uma contagem universal do domínio.
 
+
+### 4.4 Grupos de domínio não são automaticamente administradores locais
+
+Depois de descobrir uma conta, procuro seu papel no domínio:
+
+~~~cmd
+net user <USER> /domain
+net group "Domain Admins" /domain
+~~~
+
+Grupos personalizados (por exemplo, <code>sysadmin</code>) precisam ser investigados por **descrição, membros, GPOs e ACLs**. O nome de um grupo não garante privilégios de <code>Domain Admin</code> nem de administrador local. No DC, a distinção entre contas locais e do domínio exige atenção: um controlador de domínio não possui a mesma base de contas locais de uma estação WRK.
+
+
+> **BLOCO 2 · Política de autenticação e Kerberos** — primeiro observo a política, depois escolho um teste justificado. Não confundo tentativas online com cracking offline.
+
 ---
 
 ## 5. Password Spraying - primeiro a política de senhas
@@ -450,7 +499,39 @@ hashcat -m 18200 hashes.txt --show
 
 **Aprendizado:** Hashcat compara senhas candidatas com o material criptográfico, não “descriptografa a senha”. Apesar de aparecer perto da enumeração autenticada na trilha, **AS-REP Roasting pode começar sem autenticação prévia**.
 
+
+### 6.3 Kerberoasting não é AS-REP Roasting
+
+As duas técnicas permitem testes **offline**, mas o requisito muda:
+
+| Técnica | Conta-alvo | O que solicito ao KDC | Hashcat (RC4 / etype 23) |
+|---|---|---|---|
+| AS-REP Roasting | Usuário com pré-autenticação desabilitada | AS-REP, sem conhecer sua senha | <code>-m 18200</code> |
+| Kerberoasting | Conta de serviço associada a SPN | TGS, normalmente com login válido no domínio | <code>-m 13100</code> |
+
+O SPN é o identificador de serviço (por exemplo, <code>HTTP/servidor.dominio</code>). Uma conta com SPN **não significa senha fraca**, nem garante que um serviço esteja acessível na rede.
+
+~~~bash
+GetUserSPNs.py '<DOMAIN>/<USER>:<PASSWORD>' \
+  -dc-ip <DC_IP> \
+  -request-user <SERVICE_ACCOUNT> \
+  -outputfile servico.tgs
+
+hashcat -m 13100 servico.tgs wordlist.txt
+hashcat -m 13100 servico.tgs --show
+~~~
+
+- <code><DOMAIN>/<USER>:<PASSWORD></code>: credencial **do usuário que solicita** o ticket; não é a senha do serviço-alvo.
+- <code>-request-user</code>: seleciona qual conta associada a SPN terá o TGS solicitado.
+- <code>-outputfile</code>: grava material no formato aceito pelo Hashcat.
+- <code>-m 13100</code>: apenas TGS **etype 23 / RC4-HMAC**. Outros tipos exigem modos diferentes.
+- <code>\\</code> ao final da linha: continua o mesmo comando no Bash.
+
+**Aprendizado:** um usuário comum autenticado pode conseguir um TGS; não é necessário ter a senha do serviço para realizar o Kerberoasting. <code>Status: Exhausted</code> e <code>Recovered: 0</code> significam apenas que os candidatos daquela execução não recuperaram a senha. Nenhum resultado de cracking deve ser tratado como acesso comprovado sem autenticação posterior.
+
 ---
+
+> **BLOCO 3 · Enumeração autenticada** — acesso como usuário de domínio: contexto da sessão, privilégios do token, serviços, tarefas, registro, AD e ACLs.
 
 ## 7. Authenticated Enumeration - CMD na estação WRK
 
@@ -544,6 +625,29 @@ reg query HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall
 
 O primeiro caminho guarda configurações de logon; em máquinas mal configuradas pode haver dados de autologon. O segundo ajuda a identificar aplicativos instalados. A leitura de algumas chaves depende de permissão.
 
+
+### 7.5 Pastas, permissões e erros que importam
+
+Encontrar uma pasta não equivale a conseguir lê-la, alterá-la ou executar código no contexto de outra conta.
+
+~~~powershell
+Test-Path -LiteralPath 'C:\Scripts'
+Get-ChildItem -LiteralPath 'C:\Scripts' -Force -ErrorAction Continue
+icacls.exe 'C:\Scripts'
+icacls.exe 'C:\Downloads'
+~~~
+
+O <code>icacls.exe</code> recebe o alvo conforme sua própria sintaxe; para inspecionar vários diretórios independentes, faço chamadas separadas. <code>-ErrorAction Continue</code> mostra erros em vez de ocultá-los com <code>SilentlyContinue</code>.
+
+| Permissão / resultado | Interpretação |
+|---|---|
+| <code>RX</code> | Ler e executar; **não** equivale a modificar |
+| <code>WD</code> / <code>AD</code> | Escrever dados / criar subdiretórios conforme ACE e herança |
+| <code>F</code> | Controle total no objeto indicado |
+| <code>Access denied</code> | A identidade atual não conseguiu executar aquela operação |
+
+**Ponto importante:** poder criar um arquivo em <code>C:\Downloads</code> não significa poder substituir um arquivo administrativo preexistente. Para identificar um caminho de privilégio, preciso também de um **processo, serviço ou tarefa privilegiada que consuma um recurso modificável por mim**.
+
 ---
 
 ## 8. PowerShell e módulo ActiveDirectory
@@ -605,11 +709,26 @@ Get-LocalGroupMember -Group Administrators
 
 **Lembrete:** não confundir <code>Get-LocalUser</code> com <code>Get-LocalGroup</code> ao responder quantidades pedidas pela room.
 
+
+### 8.5 Atributos de contas de serviço e delegação
+
+~~~powershell
+Get-ADUser -Filter {ServicePrincipalName -like "*"} -Properties ServicePrincipalName |
+  Select-Object SamAccountName,ServicePrincipalName
+
+Get-ADUser -Identity <SERVICE_ACCOUNT> -Properties TrustedToAuthForDelegation,msDS-AllowedToDelegateTo |
+  Select-Object SamAccountName,TrustedToAuthForDelegation,msDS-AllowedToDelegateTo
+~~~
+
+<code>ServicePrincipalName</code> ajuda a encontrar contas associadas a serviços; <code>msDS-AllowedToDelegateTo</code> mostra destinos configurados para delegação restrita tradicional. Uma flag de delegação isolada **não garante** que seja possível representar outra conta perante qualquer serviço.
+
+**Quando preciso enxergar permissões entre objetos**, não basta listar membros de grupos: examino ACLs, GPOs e relações de controle (PowerView e BloodHound).
+
 ---
 
 ## 9. PowerView - mais consultas sobre o domínio
 
-O **PowerView** integra o conjunto PowerSploit e ajuda a analisar usuários, grupos, SPNs e computadores. No laboratório o arquivo estava disponível no diretório <code>Recon</code> do PowerSploit.
+O **PowerView** integra o conjunto PowerSploit e ajuda a analisar usuários, grupos, SPNs, computadores e direitos sobre objetos do AD. No laboratório o arquivo estava disponível no diretório <code>Recon</code> do PowerSploit.
 
 ~~~powershell
 . .\PowerView.ps1
@@ -618,58 +737,90 @@ Get-DomainUser *admin*
 Get-DomainGroup "*admin*"
 Get-DomainComputer
 Get-DomainUser -SPN
+Get-DomainObjectAcl -Identity <USER> -ResolveGUIDs
 ~~~
 
-A expressão <code>. .\PowerView.ps1</code> faz **dot-sourcing** para carregar funções na sessão atual. O parâmetro <code>-SPN</code> procura contas com Service Principal Names (relevantes ao estudo de Kerberoasting).
+A expressão <code>. .\PowerView.ps1</code> faz **dot-sourcing** para carregar funções na sessão atual. O parâmetro <code>-SPN</code> procura contas com Service Principal Names (Kerberoasting); <code>Get-DomainObjectAcl</code> examina permissões no objeto, e <code>-ResolveGUIDs</code> traduz identificadores de direitos quando possível. A versão do PowerView e os direitos de leitura podem limitar a saída.
 
 **Diferença rápida:** AS-REP Roasting busca contas sem pré-autenticação; Kerberoasting envolve tickets de serviço associados a SPNs. São técnicas distintas.
 
 ---
 
+> **BLOCO 4 · Relações de privilégio e checklist** — em vez de testar novas técnicas aleatoriamente, organizo as permissões obtidas na enumeração e investigo caminhos concretos.
+
 ## 10. BloodHound - mapear relações e privilégios
 
-O **BloodHound** usa grafos:
+Depois da enumeração tradicional, falta responder à pergunta principal: **minha conta possui uma relação de controle com outro usuário, grupo ou computador?** O BloodHound transforma usuários, grupos e máquinas em **nós (nodes)** e permissões/associações em **arestas (edges)**.
 
-- **Nodes**: usuários, computadores, grupos e outros objetos.
-- **Edges**: pertencimento, sessões, direitos e relações entre esses objetos.
+| Ferramenta | Onde executa | Para que uso |
+|---|---|---|
+| <code>SharpHound.exe</code> | Windows autenticado no domínio | Coleta oficial, incluindo relações de AD e, conforme o método, informações de computadores |
+| <code>bloodhound-ce-python</code> | Linux / AttackBox | Coleta remota para **BloodHound Community Edition** |
+| <code>bloodhound-python</code> | Linux / AttackBox | Coletor de **BloodHound Legacy**: não presumir compatibilidade com CE |
+| <code>BloodHound CE</code> | Interface web | Importar dados, investigar ACLs e visualizar caminhos |
 
-**SharpHound** coleta em Windows; **BloodHound.py** coleta em Linux. O BloodHound-CE visualiza o ZIP importado. Verificar compatibilidade entre versões do coletor e do servidor.
+**Compatibilidade importa:** o projeto BloodHound.py distingue o coletor Legacy (<code>bloodhound-python</code>) do CE (<code>bloodhound-ce-python</code>). No BloodHound CE, o SharpHound compatível deve ser obtido na própria interface (**Settings → Download Collectors**). Consulte [BloodHound.py](https://github.com/dirkjanm/BloodHound.py) e [SharpHound](https://github.com/SpecterOps/SharpHound).
 
-### 10.1 Coletar no Linux
+### 10.1 Coletar pela AttackBox (Linux)
+
+Primeiro confiro o executável disponível:
 
 ~~~bash
-bloodhound-python -u <USER> -p '<PASSWORD>' \
-  -d <DOMAIN> -ns <DC_IP> -c All --zip
+command -v bloodhound-ce-python
+command -v bloodhound-python
 ~~~
 
-- <code>-u/-p</code>: credenciais do laboratório.
-- <code>-d</code>: domínio.
-- <code>-ns</code>: DNS a utilizar.
-- <code>-c All</code>: métodos de coleta disponíveis.
-- <code>--zip</code>: compacta para importação.
+Se o ambiente usa **CE**, mas o primeiro não existe, a instalação isolada por <code>pipx install bloodhound-ce</code> evita misturar dependências. Em ambientes com coletor já fornecido pela room, uso a versão apropriada sem reinstalar tudo.
 
-**Resultado observado na room:** 1 domínio, 2 computadores, 32 usuários, 58 grupos, 5 GPOs, 15 OUs, 19 containers e 0 trusts. Em uma tentativa, o Kerberos falhou devido à resolução de nomes e a coleta continuou com **fallback para NTLM**. É importante configurar corretamente o DNS do AD.
+~~~bash
+bloodhound-ce-python -u <USER> -p '<PASSWORD>' \
+  -d <DOMAIN> -ns <DC_IP> \
+  -c DCOnly --zip
+~~~
 
-No Windows:
+| Parâmetro | Função |
+|---|---|
+| <code>-u</code> / <code>-p</code> | Usuário e senha **de domínio** conhecidos |
+| <code>-d</code> | Nome DNS do domínio |
+| <code>-ns</code> | DNS a consultar — no laboratório, normalmente o DC |
+| <code>-c DCOnly</code> | Coleta relações consultáveis via DC, como grupos, ACLs e trusts, sem enumerar individualmente outros hosts |
+| <code>--zip</code> | Gera pacote para importar na interface |
+
+Quando a coleta somente pelo DC não responde uma questão de **sessões ou privilégios locais**, amplio o escopo conscientemente, por exemplo para <code>-c All</code>. Coletas mais abrangentes podem gerar mais tráfego e alertas.
+
+**Exemplo registrado em outra room:** o coletor retornou 1 domínio, 2 computadores, 32 usuários, 58 grupos, 5 GPOs, 15 OUs e 0 trusts. Uma tentativa Kerberos falhou por resolução de nomes e fez fallback para NTLM. Essas contagens **pertencem àquela room**, não ao laboratório atual.
+
+### 10.2 Coletar pelo Windows (SharpHound)
 
 ~~~cmd
-SharpHound.exe --CollectionMethods All --Domain <DOMAIN> --ExcludeDCs
+SharpHound.exe --CollectionMethods DCOnly --Domain <DOMAIN>
 ~~~
 
-<code>--CollectionMethods All</code> faz coleta abrangente; <code>--ExcludeDCs</code> exclui DCs de métodos de enumeração de computadores aplicáveis. Isso não torna a coleta invisível nem impede necessariamente todas as consultas ao DC.
+Usar o binário **compatível com a instância CE** e somente quando sua execução for permitida no laboratório. Um coletor Windows não concede privilégios administrativos; regras AppLocker/Defender podem impedir sua execução. <code>DCOnly</code> concentra a coleta nas relações do diretório; <code>All</code> inclui métodos adicionais, sujeitos a permissões e disponibilidade.
 
-### 10.2 Importar e investigar
+### 10.3 Importar e analisar sem se perder no grafo
 
-Abrir a instância do BloodHound-CE fornecida no laboratório e:
+Na instância CE do laboratório:
 
-1. **Administration → File Ingest**: importar o ZIP.
-2. **Explore**: pesquisar usuários, grupos e computadores.
-3. **Cypher**: executar consultas, como **All Domain Admins**.
-4. **Pathfinding**: escolher um usuário inicial e um grupo-alvo para estudar os caminhos.
+1. **Administration → File Ingest**: enviar o ZIP.
+2. **Explore**: buscar o nó da conta já comprometida.
+3. **Node Info**: revisar <code>Member Of</code>, <code>Outbound Object Control</code>, direitos de execução e sessões, quando coletadas.
+4. **Pathfinding**: origem = usuário conhecido; destino = grupo/conta com privilégios relevantes. Confirmar manualmente qualquer aresta promissora.
 
-Na room, foram investigados <code>asrepuser1</code>, <code>DRGONZ0</code>, <code>DOMAIN ADMINS</code> e caminhos iniciados em <code>EMPANADAL0V3R</code>.
+Arestas de interesse incluem <code>GenericAll</code>, <code>GenericWrite</code>, <code>WriteDacl</code>, <code>AddMember</code> e direitos administrativos locais, quando **efetivamente presentes nos dados coletados**. Uma relação no gráfico pode depender de privilégios adicionais, contexto, políticas ou mudanças no ambiente: **não é prova automática de exploração**.
 
-**Dica:** o número de grupos no BloodHound pode não coincidir com <code>net group /domain</code>. Confirme o tipo de objeto, o método de coleta e eventuais limitações antes de responder questões de contagem ou tirar conclusões sobre permissões.
+**Quando uma consulta não mostra caminho:** conferir se o ZIP foi importado, se a coleta incluiu ACLs, se a identidade é a correta e se os nomes de domínio foram resolvidos. A ausência de arestas no gráfico não comprova a inexistência de permissões.
+
+### 10.4 BloodHound x PowerView x NET
+
+| Preciso saber... | Uso primeiro |
+|---|---|
+| Quem pertence a um grupo? | <code>net group</code> ou <code>Get-ADGroupMember</code> |
+| Quais atributos e SPNs uma conta tem? | <code>Get-ADUser</code> / <code>Get-DomainUser</code> |
+| Que ACE aparece na DACL de um objeto? | <code>Get-DomainObjectAcl</code> ou leitura autorizada do descritor AD |
+| Existe cadeia de permissões entre minha conta e um objetivo? | **BloodHound** e validação das arestas |
+
+Usei a enumeração manual para aprender cada comando; uso o BloodHound para **organizar e priorizar** o que vale investigar, não para substituir a interpretação dos resultados.
 
 ---
 
@@ -682,11 +833,11 @@ Na room, foram investigados <code>asrepuser1</code>, <code>DRGONZ0</code>, <code
 | Usuários | LDAP, RPC, RIDs, lista deduplicada | ldapsearch, rpcclient, Kerbrute |
 | Domínio | Grupos, RID, grupo primário, relações | RPC, LDAP |
 | Autenticação | Complexidade e política de bloqueio | rpcclient, CrackMapExec |
-| Kerberos | Contas sem pré-autenticação, AS-REP | GetNPUsers, Rubeus, Hashcat |
+| Kerberos | Pré-autenticação, SPNs, AS-REP e TGS | GetNPUsers, GetUserSPNs, Rubeus, Hashcat |
 | Windows | Identidade, grupos locais e do domínio | whoami, NET, Get-LocalUser |
-| Sistema | Sessões, serviços, tarefas e Registro | quser, sc, schtasks, reg |
+| Sistema | Sessões, serviços, tarefas, Registro e ACLs de arquivos | quser, sc.exe, schtasks, reg, icacls |
 | AD autenticado | Usuários, grupos, computadores, política | ActiveDirectory, PowerView |
-| Relações | Privilégios, associações e caminhos | BloodHound |
+| Relações | ACLs, grupos privilegiados, GPOs e caminhos | PowerView, BloodHound CE |
 
 ### Referência de operadores e sintaxe
 
@@ -701,6 +852,16 @@ Na room, foram investigados <code>asrepuser1</code>, <code>DRGONZ0</code>, <code
 | <code>-Filter</code> (PowerShell) | Filtra os objetos retornados |
 | <code>-Properties</code> | Solicita atributos adicionais |
 | <code>.Count</code> | Conta elementos retornados |
+
+
+### Referências e posts correlatos
+
+- [Proxy — SMB, contas de serviço e delegação Kerberos](https://github.com/redp4w/redp4w.github.io/blob/main/_posts/2026-10-22-proxy.md)
+- [Windows — armazenamento de credenciais e Mimikatz](https://github.com/redp4w/redp4w.github.io/blob/main/_posts/2026-10-21-windows-credential-stores.md)
+- [Lateral Movement em Active Directory](https://github.com/redp4w/redp4w.github.io/blob/main/_posts/2026-10-21-ad-lateral-movement.md)
+- [Checkmate — Quebrando senhas!](https://github.com/redp4w/redp4w.github.io/blob/main/_posts/2026-10-03-checkmate.md)
+- [BloodHound CE — documentação](https://bloodhound.specterops.io/)
+- [Microsoft — módulo ActiveDirectory](https://learn.microsoft.com/en-us/powershell/module/activedirectory/)
 
 ### O que aprendi
 
