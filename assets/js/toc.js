@@ -77,7 +77,9 @@
     return anchor;
   });
 
-  if (count) count.textContent = headings.length + " tópicos";
+  aside.querySelectorAll(".post-toc-count").forEach(el => {
+    el.textContent = headings.length + " tópicos";
+  });
 
   const mobile = window.matchMedia("(max-width: 980px)");
   function syncView() {
@@ -112,7 +114,12 @@
         const viewport = aside.getBoundingClientRect();
         const rect = item.getBoundingClientRect();
         if (rect.top < viewport.top + 45 || rect.bottom > viewport.bottom - 15) {
-          item.scrollIntoView({block:"nearest", inline:"nearest"});
+          // Rola apenas a lateral; evita mover a página durante a leitura.
+          if (rect.top < viewport.top + 45) {
+            aside.scrollTop -= (viewport.top + 45 - rect.top);
+          } else {
+            aside.scrollTop += (rect.bottom - viewport.bottom + 15);
+          }
         }
       }
     }
