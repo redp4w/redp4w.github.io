@@ -3,8 +3,8 @@ layout: post
 title: "Windows Credential Stores - Do Administrador Local ao Domain Admin"
 description: "Walkthrough TryHackMe: Mimikatz, LSASS, DPAPI, SAM, SecretsDump, DCC2, John, DCSync e Pass-the-Hash, com dicas para registrar logs."
 date: 2026-10-21
-categories: [walkthrough, pentest, windows, tryhackme]
-tags: [active-directory, credentials, lsass, sam, dpapi, mimikatz, secretsdump, dcc2, john, dcsync, pass-the-hash, impacket]
+categories: [walkthrough]
+tags: [windows, tryhackme, active-directory, credentials, lsass, sam, dpapi, mimikatz, secretsdump, dcc2, john, dcsync, pass-the-hash, impacket]
 ---
 
 # Windows Credential Stores - Do Administrador Local ao Domain Admin

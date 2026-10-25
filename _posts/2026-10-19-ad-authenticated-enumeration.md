@@ -3,8 +3,8 @@ layout: post
 title: "Active Directory (AD DS) - Guia prático de enumeração e autenticação"
 description: "Guia de enumeração Active Directory do básico ao autenticado: rede, DNS, SMB, LDAP, RPC, CMD, PowerShell, PowerView, Kerberos, ACLs e BloodHound CE."
 date: 2026-10-19
-categories: [guia, pentest, windows, tryhackme]
-tags: [active-directory, ad-ds, enumeration, nmap, smb, rpcclient, ldap, kerbrute, password-spraying, kerberos, as-rep-roasting, impacket, hashcat, powershell, powerview, bloodhound]
+categories: [guia]
+tags: [windows, active-directory, enumeration, nmap, smb, rpcclient, ldap, kerbrute, password-spraying, kerberos, as-rep-roasting, impacket, hashcat, powershell, powerview, bloodhound]
 ---
 
 # Active Directory (AD DS) - Guia prático completo

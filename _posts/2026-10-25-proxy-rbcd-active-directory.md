@@ -3,8 +3,8 @@ layout: post
 title: "Proxy - Do Credential Reuse ao SYSTEM no Domain Controller (RBCD)"
 description: "Walkthrough TryHackMe Proxy: enumeração AD, KeePass, senha reutilizada, BloodHound, AddAllowedToAct, RBCD, S4U2Proxy, Pass-the-Ticket e PsExec."
 date: 2026-10-25
-categories: [walkthrough, pentest, windows, tryhackme]
-tags: [proxy, active-directory, credential-reuse, keepass, bloodhound, acl, rbcd, kerberos, impacket, s4u2proxy, pass-the-ticket, psexec]
+categories: [walkthrough]
+tags: [windows, tryhackme, proxy, active-directory, credential-reuse, keepass, bloodhound, acl, rbcd, kerberos, impacket, s4u2proxy, pass-the-ticket, psexec]
 ---
 
 # Proxy - Do Credential Reuse ao SYSTEM no Domain Controller (RBCD)

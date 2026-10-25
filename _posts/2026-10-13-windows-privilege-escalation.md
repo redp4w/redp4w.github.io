@@ -3,8 +3,8 @@ layout: post
 title: "Windows Privilege Escalation - Backup Operators, Tokens e Druva inSync"
 description: "Walkthrough TryHackMe: SeBackupPrivilege, SeTakeOwnership, Utilman, SeImpersonate, RogueWinRM e serviço Druva inSync vulnerável. Comandos comentados, erros reais e dicas de enumeração."
 date: 2026-10-13
-categories: [walkthrough, pentest, windows, tryhackme]
-tags: [windows, privilege-escalation, backup-operators, sebackupprivilege, setakeownership, seimpersonate, utilman, roguewinrm, winpeas, privesccheck, wes-ng, druva-insync, impacket, pass-the-hash]
+categories: [walkthrough]
+tags: [windows, tryhackme, privilege-escalation, backup-operators, sebackupprivilege, setakeownership, seimpersonate, utilman, roguewinrm, winpeas, privesccheck, wes-ng, druva-insync, impacket, pass-the-hash]
 ---
 
 <a id="topo"></a>

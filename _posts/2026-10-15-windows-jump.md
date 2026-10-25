@@ -3,8 +3,8 @@ layout: post
 title: "Windows Jump - Do Guest ao SYSTEM: SMB, AutoLogon e Hijacking"
 description: "Walkthrough TryHackMe Windows Jump: recon, credenciais expostas em SMB e Winlogon, RunAs, Service Binary Hijacking e execução até SYSTEM."
 date: 2026-10-15
-categories: [walkthrough, pentest, windows, tryhackme]
-tags: [windows-jump, tryhackme, nmap, smb, netexec, rdp, winlogon, autologon, runas, service-binary-hijacking, icacls, msfvenom, metasploit, meterpreter, privilege-escalation]
+categories: [walkthrough]
+tags: [windows, tryhackme, windows-jump, recon, nmap, smb, netexec, rdp, winlogon, autologon, runas, service-binary-hijacking, icacls, msfvenom, metasploit, meterpreter, privilege-escalation]
 ---
 
 # Windows Jump - Do Guest ao SYSTEM: SMB, AutoLogon e Hijacking

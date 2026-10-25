@@ -3,8 +3,8 @@ layout: post
 title: "AD Lateral Movement - PsExec, WinRM, Pass-the-Hash e Pivoting"
 description: "Walkthrough TryHackMe completo: da WRK ao Domain Controller usando PsExec, Evil-WinRM, NT hashes, túnel SSH e ProxyChains, com explicações, comparação de ferramentas e detecção."
 date: 2026-10-21
-categories: [walkthrough, pentest, windows, tryhackme]
-tags: [active-directory, lateral-movement, psexec, impacket, netexec, smb, winrm, evil-winrm, pass-the-hash, ntlm, ssh, pivoting, proxychains, socks, windows-laps, detection]
+categories: [walkthrough]
+tags: [windows, tryhackme, active-directory, lateral-movement, psexec, impacket, netexec, smb, winrm, evil-winrm, pass-the-hash, ntlm, ssh, pivoting, proxychains, socks, windows-laps, detection]
 ---
 
 <a id="topo"></a>
