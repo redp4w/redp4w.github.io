@@ -566,3 +566,119 @@ Se já tenho uma credencial válida, não preciso começar sempre por CVEs, Mimi
 | <code>export KRB5CCNAME=...</code> | Variável de ambiente que aponta para o cache |
 
 **Erro comum no Linux:** <code>command not found</code> não quer dizer necessariamente que o software não existe. Verifique <code>command -v ferramenta</code>, <code>type -a ferramenta</code>, <code>pipx list</code> e possíveis nomes <code>impacket-ferramenta</code>. No laboratório havia instalações gerenciadas por <code>pyenv</code> e <code>pipx</code>, e a VM zerava após reset.
+
+
+<a id="diagnostico"></a>
+
+## 12. Se não encontrar nada, onde procurar?
+
+### Credencial válida, mas sem caminho de privilégio
+
+No Windows:
+
+~~~powershell
+whoami /all
+Get-ADUser r.williams -Properties Description,MemberOf |
+  Select-Object SamAccountName,Description,MemberOf
+Get-ADComputer -Filter * -Properties DNSHostName |
+  Select-Object Name,DNSHostName
+~~~
+
+Depois, no BloodHound:
+
+1. Marque como **Owned** só as contas realmente controladas.
+2. Procure caminhos até objetos importantes, não apenas até grupos com nomes interessantes.
+3. Analise permissões como <code>GenericAll</code>, <code>GenericWrite</code>, <code>WriteDacl</code> e <code>AddAllowedToAct</code>.
+4. Confirme a ACE no AD. Relações como <code>Contains</code> indicam estrutura, não privilégio explorável.
+
+### BloodHound não resolve o DC/LDAP
+
+~~~bash
+dig @10.64.163.15 dc01.ctf.local A +short
+nc -vz -w 3 10.64.163.15 389
+type -a bloodhound-python
+pipx list
+~~~
+
+O erro <code>Failed to resolve LDAP server IP</code> apareceu mesmo após editar <code>/etc/hosts</code>: o coletor faz consultas DNS próprias. Confira os argumentos <code>-dc</code>, <code>-gc</code>, <code>-ns</code> e <code>--dns-tcp</code>, e confirme **qual instalação** do Python está executando.
+
+### BloodHound aponta direito, mas eu não consigo usar
+
+Consulte o objeto real e a ACL correspondente:
+
+~~~powershell
+$dn = (Get-ADComputer DC01).DistinguishedName
+(Get-Acl "AD:\$dn").Access |
+  Select-Object IdentityReference,ActiveDirectoryRights,ObjectType,IsInherited
+~~~
+
+Observe se o direito é **herdado, específico a um atributo ou concedido a um grupo**. Uma aresta no grafo não substitui a validação.
+
+### Ticket foi emitido, mas SMB falha
+
+~~~bash
+echo "$KRB5CCNAME"
+klist -c "$KRB5CCNAME"
+getent hosts DC01.ctf.local
+~~~
+
+Verifique **data/horário, principal, SPN, hostname exato e resolução DNS**. Um ticket <code>cifs/DC01</code> é específico daquele serviço e host, não de qualquer protocolo da rede.
+
+**Regra de estudo:** diferenciar *indício → permissão confirmada → técnica executada → impacto demonstrado*. Isso evita confundir hipótese de CVE com acesso obtido.
+
+<a id="checklist"></a>
+
+## 13. Checklist reutilizável para futuras rooms AD
+
+| Fase | O que procurar | Ferramenta |
+|---|---|---|
+| 1. Escopo | Hosts, domínio, controlador, DNS | Nmap, registros SRV |
+| 2. Autenticação | Contas e serviços onde o login funciona | NetExec, RDP |
+| 3. Enumeração | Usuários, descrições, grupos, SPNs | LDAP, AD PowerShell |
+| 4. Credenciais | Arquivos de configuração e bancos acessíveis | Busca restrita a pastas legíveis |
+| 5. Reutilização | Senhas já obtidas em contas relacionadas | Uma validação pontual; conferir lockout |
+| 6. Relações AD | ACLs e caminhos de controle | BloodHound + <code>Get-Acl</code> |
+| 7. Pré-requisitos | MAQ, delegação, conta de máquina controlada | Atributos AD, Impacket |
+| 8. Execução | Alteração confirmada e ticket obtido | <code>rbcd.py</code>, <code>getST.py</code> |
+| 9. Evidência | Ticket aceito e contexto do shell | <code>klist</code>, <code>nxc</code>, <code>whoami</code> |
+| 10. Documentação | Comandos, saídas, aprendizados e limites | Notas do exercício |
+
+**O que mais economiza tempo:** antes de tentar escalar com exploit local, pergunto se **minha conta já pode modificar algum objeto importante do domínio**.
+
+<a id="defesa"></a>
+
+## 14. Detecção, mitigação e referências
+
+Três condições facilitaram a escalação:
+
+- **Senha reutilizada:** o segredo relacionado a HelpDesk autenticou em <code>r.williams</code>.
+- **Permissão excessiva no DC:** <code>r.williams</code> podia modificar o atributo RBCD de <code>DC01$</code>.
+- **MachineAccountQuota = 10:** permitiu criar uma conta de máquina controlada.
+
+Em um ambiente real, as medidas centrais seriam: exigir senhas distintas e gestão de segredos; revisar delegações e ACEs dos controladores de domínio; evitar permissões de escrita RBCD desnecessárias; limitar ingresso/criação de computadores; avaliar <code>MachineAccountQuota=0</code> se o ingresso for gerenciado, sem depender só dessa configuração.
+
+### Eventos que merecem correlação
+
+| Event ID | O que investigar |
+|---|---|
+| **4741** | Nova conta de computador |
+| **5136** | Modificação de objeto no AD, incluindo possível alteração de atributo RBCD |
+| **4769** | Requisições Kerberos de ticket de serviço |
+| **4624** | Logon no host |
+| **7045** | Serviço instalado remotamente, compatível com o comportamento PsExec |
+
+A visibilidade depende de auditoria habilitada. Um evento isolado não prova comprometimento. Uma sequência **nova máquina → alteração RBCD → tickets incomuns → SMB administrativo → novo serviço** merece atenção.
+
+### Material complementar
+
+- [Meu guia: Active Directory — Enumeração e Autenticação](https://github.com/redp4w/redp4w.github.io/blob/main/_posts/2026-10-19-ad-authenticated-enumeration.md)
+- [Meu walkthrough: Checkmate — Quebrando senhas!](https://github.com/redp4w/redp4w.github.io/blob/main/_posts/2026-10-03-checkmate.md)
+- [Impacket — addcomputer.py](https://github.com/fortra/impacket/blob/master/examples/addcomputer.py)
+- [Impacket — rbcd.py](https://github.com/fortra/impacket/blob/master/examples/rbcd.py)
+- [Impacket — getST.py](https://github.com/fortra/impacket/blob/master/examples/getST.py)
+- [Microsoft — Evento 4741: computer account created](https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4741)
+- [Australian Cyber Security Centre — Active Directory compromises](https://www.cyber.gov.au/publication/detecting-and-mitigating-active-directory-compromises)
+
+---
+
+**O principal aprendizado da Proxy:** Active Directory não é apenas senha e grupo administrativo. **Relações entre objetos** também concedem poder. Neste laboratório, uma credencial reutilizada deu acesso a uma ACE específica; o RBCD transformou essa permissão em um ticket Kerberos válido; o SMB e o PsExec confirmaram o impacto com SYSTEM no Domain Controller.
