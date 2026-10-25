@@ -3,8 +3,8 @@ layout: post
 title: "O básico de custom wordlists"
 description: "Walkthrough prático mostrando como coletar informações, criar wordlists personalizadas, descobrir diretórios e testar credenciais em um laboratório"
 date: 2026-10-01
-categories: [tutorial, pentest, web, tryhackme]
-tags: [osint, cewl, ffuf, hydra, crunch, wordlist, reconnaissance, tryhackme]
+categories: [tutorial]
+tags: [tryhackme, web, recon, wordlist, osint, cewl, ffuf, hydra, crunch]
 ---
 
 # O básico de wordlists

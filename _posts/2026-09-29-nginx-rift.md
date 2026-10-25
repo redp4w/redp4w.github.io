@@ -3,8 +3,8 @@ layout: post
 title: "TryHackMe - Nginx Rift | Buffer Overflow"
 description: "Walkthrough da vulnerabilidade Nginx Rift: exploração, análise técnica, detecção e mitigação."
 date: 2026-09-29
-categories: [TryHackMe, Linux, Buffer Overflow, Nginx]
-tags: [CVE-2026-42945, Nginx, Buff Overflow, API, Rewrite, SOC, RCE]
+categories: [walkthrough]
+tags: [linux, tryhackme, web, buffer-overflow, cve-2026-42945, nginx, rce, soc]
 ---
 
 # NGINX Rift — CVE-2026-42945 | TryHackMe Walkthrough

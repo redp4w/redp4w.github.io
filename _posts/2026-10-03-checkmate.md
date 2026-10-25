@@ -3,8 +3,8 @@ layout: post
 title: "Checkmate - Quebrando senhas!"
 description: "Walkthrough da room Checkmate do TryHackMe: criação de wordlists, Hydra, CeWL, CUPP, Hashcat, John, Crunch e análise de padrões de senha."
 date: 2026-10-03
-categories: [walkthrough, pentest, tryhackme]
-tags: [passwords, hydra, cewl, cupp, hashcat, john, crunch, wordlist, ssh, tryhackme]
+categories: [walkthrough]
+tags: [tryhackme, passwords, wordlist, hydra, cewl, cupp, hashcat, john, crunch, ssh]
 ---
 
 # Checkmate - Quebrando senhas!

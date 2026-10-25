@@ -3,8 +3,8 @@ layout: post
 title: "Linux Privilege Escalation - do sudo ao NFS"
 description: "Walkthrough de Linux Privilege Escalation no TryHackMe: enumeração de sistema, usuário, rede e arquivos, seguido de sudo, SUID, PATH Hijacking, capabilities, Cron Jobs e NFS. Comandos explicados, dicas e troubleshooting."
 date: 2026-10-09
-categories: [walkthrough, pentest, linux, tryhackme]
-tags: [linux, privilege-escalation, sudo, ld-preload, suid, path-hijacking, capabilities, cron, nfs, gtfobins, tryhackme]
+categories: [walkthrough]
+tags: [linux, tryhackme, privilege-escalation, sudo, ld-preload, suid, path-hijacking, capabilities, cron, nfs, gtfobins]
 ---
 
 <a id="topo"></a>

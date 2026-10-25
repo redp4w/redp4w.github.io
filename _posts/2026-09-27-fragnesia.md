@@ -3,8 +3,8 @@ layout: post
 title: "TryHackMe - Fragnesia | Linux Kernel Privilege Escalation"
 description: "Walkthrough da vulnerabilidade Fragnesia: exploração, análise técnica, detecção e mitigação."
 date: 2026-09-27
-categories: [TryHackMe, Linux, Privilege-Escalation]
-tags: [CVE-2026-46300, Fragnesia, Dirty-Frag, Kernel, Page-Cache, SOC]
+categories: [walkthrough]
+tags: [linux, tryhackme, privilege-escalation, cve-2026-46300, fragnesia, dirty-frag, kernel, page-cache, soc]
 ---
 
 # TryHackMe — Fragnesia Walkthrough

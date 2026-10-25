@@ -3,8 +3,8 @@ layout: post
 title: "Linux Privilege Escalation - Cron, SUID e LD_PRELOAD"
 description: "Walkthrough TryHackMe: enumeração no Ubuntu, cron inseguro, Bash SUID, reverse shell e escalação até root com LD_PRELOAD."
 date: 2026-10-11
-categories: [walkthrough, pentest, linux, tryhackme]
-tags: [linux, privilege-escalation, cron, pspy, bash, suid, uid, euid, sudo, ld-preload, reverse-shell]
+categories: [walkthrough]
+tags: [linux, tryhackme, privilege-escalation, cron, pspy, bash, suid, sudo, ld-preload, reverse-shell]
 ---
 
 # Linux Privilege Escalation - Cron, SUID e LD_PRELOAD

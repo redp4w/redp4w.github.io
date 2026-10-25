@@ -3,8 +3,8 @@ layout: post
 title: "Bind Shell e Reverse Shell - do Netcat ao Socat/TLS"
 description: "Guia prático sobre bind e reverse shell com Netcat e Socat, incluindo Windows, Linux, transferência de ferramentas, upgrade de TTY, TLS e troubleshooting."
 date: 2026-10-07
-categories: [tutorial, pentest, linux, windows]
-tags: [reverse-shell, bind-shell, netcat, socat, powershell, tty, pty, tls, openssl, windows, linux, tryhackme]
+categories: [tutorial]
+tags: [linux, windows, tryhackme, reverse-shell, bind-shell, netcat, socat, powershell, tty, pty, tls, openssl]
 ---
 
 # Bind Shell e Reverse Shell - do Netcat ao Socat/TLS
