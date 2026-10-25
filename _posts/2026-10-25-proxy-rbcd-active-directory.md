@@ -477,3 +477,92 @@ THM{RBCD_S4U2Pr0xy_T1ck3t_Th3ft_2_DA}
 ~~~
 
 **Resultado comprovado:** RBCD aceita, ticket S4U emitido, autenticação administrativa SMB, execução remota como SYSTEM e flag encontrada.
+
+
+<a id="desvios"></a>
+
+## 10. Caminhos investigados que não avançaram
+
+Não é necessário repetir todos os erros, mas é útil registrar **por que uma hipótese foi abandonada**.
+
+| Pista | Evidência encontrada | Por que não resolvia |
+|---|---|---|
+| **Kerberoasting: svc.helpdesk** | TGS <code>$krb5tgs$23$</code>; Hashcat <code>-m 13100</code> com rockyou não recuperou senha | Material de cracking não equivale a senha ou sessão |
+| **svc.mssql** | Conta de serviço com SPNs MSSQL e associação a Backup Operators | Pista interessante, sem cadeia comprovada |
+| **Delegação tradicional** | <code>svc.helpdesk</code> tinha <code>TrustedToAuthForDelegation=True</code>, mas lista <code>msDS-AllowedToDelegateTo</code> vazia | Não identificamos um caminho de delegação utilizável |
+| **Mimikatz** | <code>privilege::debug</code> falhou; <code>sekurlsa::logonpasswords</code> retornou acesso negado | Sessão comum não tinha privilégios para ler LSASS |
+| **PrivescCheck / WES-NG / Spooler** | Permissões e possíveis CVEs em build antigo | Hipótese ou CVE listado não é exploração confirmada |
+| **Tarefa de HelpDesk** | Eventos 129/200 mostraram <code>\HelpDesk\HelpDesk-TicketRenewal</code>; <code>schtasks</code> não a listou | Não consegui demonstrar escrita ou execução controlável |
+| **IT-Shared / svc.scanner** | Share Guest e scanner de scripts executados periodicamente | Achados da investigação, mas não constituíram a cadeia RBCD |
+| **Ticket antigo de svc.helpdesk** | KRB-CRED no arquivo <code>HelpDesk-Auth.b64</code> | TGT expirado, sem renovação possível em outubro de 2026 |
+
+### 10.1 Por que o arquivo HelpDesk-Auth.b64 não serviu?
+
+No Desktop de <code>r.williams</code>, um aviso dizia que a automação HelpDesk executava periodicamente e mantinha temporários em <code>C:\Windows\Temp</code>. Havia o arquivo <code>HelpDesk-Auth.b64</code>, legível por <code>r.williams</code>.
+
+Os primeiros bytes Base64 decodificados indicaram formato **KRB-CRED**. Depois da conversão para <code>.ccache</code>:
+
+~~~bash
+ticketConverter.py HelpDesk-Auth.kirbi HelpDesk-Auth.ccache
+klist -c HelpDesk-Auth.ccache
+~~~
+
+O cache era de <code>svc.helpdesk@CTF.LOCAL</code>, para <code>krbtgt/ctf.local</code>. Portanto **TGT**, não hash Kerberoasting.
+
+~~~text
+Início:      20/05/2026
+Expiração:   21/05/2026
+Renovação:   até 27/05/2026
+~~~
+
+A execução da room foi em **25/10/2026**. Converter formato de arquivo não restaura a validade de um ticket expirado.
+
+### 10.2 Como identifiquei a tarefa mesmo sem acesso direto?
+
+~~~powershell
+Get-WinEvent -FilterHashtable @{
+  LogName='Microsoft-Windows-TaskScheduler/Operational'
+  Id=129,200
+  StartTime=(Get-Date).AddDays(-1)
+} | Where-Object {
+  $_.Message -match 'HelpDesk|powershell'
+} | Select-Object TimeCreated,Id,Message | Format-List
+~~~
+
+Os eventos expuseram a execução de <code>\HelpDesk\HelpDesk-TicketRenewal</code>, mas o comando <code>schtasks.exe /query</code> retornou que não localizava o caminho. **Não ver uma tarefa em uma ferramenta não prova que ela nunca existiu**; permissões e ciclo de vida podem mudar a visibilidade.
+
+### 10.3 Aprendizado do desvio
+
+Se já tenho uma credencial válida, não preciso começar sempre por CVEs, Mimikatz ou cracking. No AD, **grupos, ACLs e relações** podem oferecer um caminho muito mais direto.
+
+<a id="ferramentas"></a>
+
+## 11. Ferramentas: quando usar e como interpretar
+
+| Ferramenta | Serve para | Limitação |
+|---|---|---|
+| **Nmap** | Serviços e portas | Serviço exposto não prova falha |
+| **NetExec** | Validar credenciais e privilégios de rede | Resultado depende do protocolo |
+| **LDAP / módulo AD** | Contas, grupos, atributos e políticas | Permissões e escopo de busca importam |
+| **BloodHound** | Relacionamentos entre objetos e identidades | Precisa confirmar ACL e pré-requisitos |
+| **addcomputer.py** | Criar uma conta de máquina | Muda o domínio; pode falhar por ACL/cota |
+| **rbcd.py** | Ler ou escrever delegação RBCD | A ação <code>write</code> altera segurança |
+| **getST.py** | Emitir ticket Kerberos para serviço/S4U | Requer SPN e delegação válidos |
+| **klist** | Inspecionar principal, SPN e datas | Não testa se serviço aceita o ticket |
+| **psexec.py** | Execução remota administrativa | Usa compartilhamento e cria serviço |
+
+### Operadores e parâmetros frequentes
+
+| Sintaxe | Significado |
+|---|---|
+| Barra <code>\</code> ao final da linha Bash | Continua o comando; não pode haver espaços depois |
+| Crase PowerShell | Continuação de linha em scripts PowerShell |
+| <code>$</code> em <code>LABPC01$</code> | Parte do nome da conta de máquina |
+| <code>-k</code> | Autenticação Kerberos |
+| <code>-no-pass</code> | Não solicita senha |
+| <code>--use-kcache</code> | Usa o cache Kerberos no NetExec |
+| <code>-action read/write</code> | Consultar/alterar RBCD |
+| <code>-impersonate</code> | Identidade representada no fluxo S4U |
+| <code>export KRB5CCNAME=...</code> | Variável de ambiente que aponta para o cache |
+
+**Erro comum no Linux:** <code>command not found</code> não quer dizer necessariamente que o software não existe. Verifique <code>command -v ferramenta</code>, <code>type -a ferramenta</code>, <code>pipx list</code> e possíveis nomes <code>impacket-ferramenta</code>. No laboratório havia instalações gerenciadas por <code>pyenv</code> e <code>pipx</code>, e a VM zerava após reset.
