@@ -1,25 +1,44 @@
 ---
 layout: default
 ---
-<section class="archive-intro">
-  <div class="eyebrow">INDEX / SINGLE ARCHIVE</div>
-  <h1>{{ page.title | escape }}<span class="cursor glow">_</span></h1>
-  <p>{{ page.description | escape }}</p>
-</section>
-<!-- Filtros progressivos: sem JavaScript, a listagem completa continua acessível. -->
-<section class="archive-tools" aria-label="Busca e filtros">
-  <label for="post-search">Buscar nos registros</label>
-  <input id="post-search" type="search" placeholder="Ex.: Linux, SOC, CVE, TryHackMe..." autocomplete="off">
-  <div class="filter-list" role="group" aria-label="Filtrar por tag">
-    <button class="filter-chip active" type="button" data-filter="" aria-pressed="true">Todas</button>
-    {% for tag in site.tags %}
-      <button class="filter-chip" type="button" data-filter="{{ tag[0] | downcase | escape }}" aria-pressed="false">#{{ tag[0] | escape }}</button>
-    {% endfor %}
+<section class="archive-head hero" aria-label="Identificação do arquivo">
+  <div class="eyebrow"><span class="status-dot" aria-hidden="true"></span>SECURITY FIELD NOTES <span class="hero-index">[ PUBLIC LOG ]</span><span class="cursor glow" aria-hidden="true">_</span></div>
+  <div class="hero-line">
+    <span>MODE: LEARNING</span>
+    <span>BLUE TEAM / RED TEAM / RESEARCH</span>
+    <span>{{ site.posts.size }} REGISTROS</span>
   </div>
-  <p id="result-count" class="result-count" aria-live="polite">{{ site.posts.size }} registros disponíveis</p>
+</section>
+<section class="archive-tools" aria-label="Busca e filtros">
+  <div class="archive-search">
+    <label for="post-search">Buscar nos registros</label>
+    <input id="post-search" type="search" list="search-suggestions" placeholder="Tema, técnica, CVE, ferramenta..." autocomplete="off">
+    <datalist id="search-suggestions">
+      {% assign suggestions = site.tags | sort %}
+      {% for tag in suggestions %}<option value="{{ tag[0] | escape }}"></option>{% endfor %}
+      <option value="reconhecimento"></option><option value="reconnaissance"></option>
+      <option value="AD"></option><option value="privesc"></option>
+    </datalist>
+  </div>
+  <div class="archive-facets" role="group" aria-label="Refinar resultados">
+    <div class="facet"><label for="filter-system">Sistema operacional</label>
+      <select id="filter-system"><option value="">Todos os sistemas</option><option value="none">Não específico</option></select></div>
+    <div class="facet"><label for="filter-tool">Ferramenta</label>
+      <select id="filter-tool"><option value="">Todas as ferramentas</option><option value="none">Sem ferramenta</option></select></div>
+    <div class="facet"><label for="filter-type">Tipo de nota</label>
+      <select id="filter-type"><option value="">Todos os tipos</option></select></div>
+    <button id="clear-filters" class="clear-filters" type="button">Limpar</button>
+  </div>
+  <div class="archive-search-status">
+    <p id="result-count" class="result-count" role="status" aria-live="polite">{{ site.posts.size }} registros</p>
+    <div id="active-tag" class="active-tag" hidden>Tag: <strong id="active-tag-name"></strong> <button id="clear-tag" type="button" aria-label="Remover filtro de tag">×</button></div>
+  </div>
 </section>
 <section class="section archive-results" aria-labelledby="entries-title">
-  <div class="section-heading"><div><span class="section-number">/ ENTRIES</span><h2 id="entries-title">Biblioteca</h2></div></div>
+  <div class="section-heading">
+    <div><span class="section-number">/ ENTRIES</span><h2 id="entries-title">Registros</h2></div>
+    <span class="archive-order">mais recentes primeiro</span>
+  </div>
   <div class="post-grid" id="archive-grid">
     {% for post in site.posts %}
       {% include post-card.html post=post %}
@@ -27,6 +46,6 @@ layout: default
       <p class="empty-state">Ainda não há publicações por aqui.</p>
     {% endfor %}
   </div>
-  <p class="empty-state" id="no-results" hidden>Nenhum registro corresponde ao filtro ou à busca.</p>
+  <p class="empty-state" id="no-results" hidden>Nenhum registro corresponde à busca ou aos filtros.</p>
 </section>
 <script defer src="{{ '/assets/js/archive.js' | relative_url }}"></script>
