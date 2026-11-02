@@ -1,7 +1,7 @@
 ---
 layout: post
 title: "NexusCorp - Do Recon ao Root: IDOR, JWT, RFI, SSH e Cron"
-description: "Walkthrough da NexusCorp no TryHackMe: Nmap, Gobuster, backup AES, usuários, Hydra, IDOR, JWT, RFI/RCE, reutilização de credenciais e escalonamento por cron/SUID."
+description: "Walkthrough da NexusCorp - THM: Nmap, Gobuster, backup AES, usuários, Hydra, IDOR, JWT, RFI/RCE, reutilização de credenciais e escalonamento por cron/SUID."
 date: 2026-11-02
 categories: [walkthrough]
 tags: [linux, tryhackme, nexuscorp, recon, nmap, gobuster, idor, jwt, hmac, rfi, rce, hydra, ssh, credential-reuse, cron, suid, privilege-escalation]
@@ -9,11 +9,13 @@ tags: [linux, tryhackme, nexuscorp, recon, nmap, gobuster, idor, jwt, hmac, rfi,
 
 # NexusCorp — Do Recon ao Root: IDOR, JWT, RFI, SSH e Cron
 
-Comecei essa room do **TryHackMe** apenas com o IP de uma empresa fictícia, a NexusCorp. Meu objetivo era descobrir a superfície de ataque, conseguir acesso ao portal, encontrar uma forma de entrar no Linux e chegar a **root**.
+Mais uma room linux do **TryHackMe**.
+Inicio: somente IP do alvo "NexusCorp".
+Objetivo era descobrir a superfície de ataque, conseguir acesso ao portal, encontrar uma forma de entrar no servidor e chegar a **root**.
 
-Não foi um único exploit. O avanço aconteceu quando consegui **ligar uma descoberta à próxima**. Também testei hipóteses que não deram certo — e vale registrar isso para não repetir os mesmos erros em outras rooms.
+Essa escalada é básicamente uma sequencia de missconfigures.
 
-> **Aviso:** walkthrough com spoilers das cinco flags. Testes feitos no laboratório autorizado do TryHackMe. Os IPs mudam quando a VM é reiniciada; substitua-os pelos do seu laboratório.
+> **Aviso:** Tudo feito em laboratório autorizado.
 
 ## Índice
 
