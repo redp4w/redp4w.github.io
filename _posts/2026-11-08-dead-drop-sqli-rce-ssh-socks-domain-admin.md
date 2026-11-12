@@ -9,7 +9,7 @@ tags: [tryhackme, dead-drop, linux, windows, active-directory, nmap, gobuster, s
 
 # Dead Drop — da aplicação web ao Domain Controller
 
-A **Dead Drop**, do TryHackMe, começa com um servidor Linux na DMZ e uma rede interna Windows. O objetivo é comprometer o controlador de domínio (**DC**) e ler a flag na área de trabalho do Administrator.
+A **Dead Drop** começa com um servidor Linux na DMZ e uma rede interna Windows. O objetivo é comprometer o controlador de domínio (**DC**) e ler a flag na área de trabalho do Administrator.
 
 Meu caminho foi: **SQL Injection no login → upload de JavaScript → RCE → leitura de backup com hash → John the Ripper → SSH → proxy SOCKS → credenciais do APK → WinRM/RDP no DC**.
 
